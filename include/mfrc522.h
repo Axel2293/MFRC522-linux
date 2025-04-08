@@ -15,7 +15,9 @@
 
 /**
  * MFRC522 registers. Described in chapter 9.2 of the datasheet.
- *  When using SPI all addresses are shifted one bit left in the "SPI address byte" (section 8.1.2.3)
+ *  When using SPI all addresses are shifted one bit left in the "SPI address byte" (8.1.2.3)
+ *  The MSB of the register address is set to 1 for read operations and 0 for write operations.
+ *  The LSB of the register address is set to 0 for all operations.
  */
 //Page 0: Command and status
 #define CommandReg              (0x01 << 1)    // starts and stops command execution
@@ -75,11 +77,14 @@
 #define TestDAC2Reg           (0x3A << 1)    // defines the test value for TestDAC2
 #define TestADCReg            (0x3B << 1)    // shows the value of ADC I and Q channels
 
+// Use logicar OR to combine the register address with the read bit
 #define MFRC522_READ_MSB        0x80          // MSB for read operation
+// Use logical AND to combine the register address with the write bit
+#define MFRC522_WRITE_MSB       0x7F          // MSB for write operation
 
 // GPIO Configuration
-#define GPIO_CHIP_NAME "gpiochip2" // Change as needed for your board
-#define RESET_PIN 30               // Change as needed for your connection
+#define GPIO_CHIP_NAME "gpiochip2"          // GPIO chip name that contains the reset pin (under /dev/gpiochipN)
+#define RESET_PIN 30                        // GPIO pin number for the MFRC522 reset line
 
 // SPI Configuration
 #define SPI_DEVICE "/dev/spidev1.0"
@@ -87,8 +92,7 @@
 #define SPI_BITS_PER_WORD 8                 // 8 bits per word
 #define SPI_MODE SPI_MODE_0                 // SPI mode 0 (CPOL=0, CPHA=0)
 
-typedef struct
-{
+typedef struct {
     int spi_fd;
     struct gpiod_chip *gpio_chip;
     struct gpiod_line *reset_line;
@@ -107,18 +111,12 @@ void mfrc522_reset(mfrc522 *dev);
  */
 // Read one byte from the specified register in the MFRC522 chip
 uint8_t mfrc522_read_register(mfrc522 *dev, uint8_t reg);
+// Read multiple bytes from the specified register in the MFRC522 chip
+int mfrc522_read_register_multiple(mfrc522 *dev, uint8_t reg, uint8_t count, uint8_t *values, uint8_t rxAlign);
 // Write one byte to the specified register in the MFRC522 chip
 void mfrc522_write_register(mfrc522 *dev, uint8_t reg, uint8_t value);
 // Write multiple bytes to the specified register in the MFRC522 chip
 void mfrc522_write_register_multiple(mfrc522 *dev, uint8_t reg, uint8_t count, uint8_t *values);
-// Read multiple bytes from the specified register in the MFRC522 chip
-int mfrc522_read_register_multiple(mfrc522 *dev, uint8_t reg, uint8_t count, uint8_t *values, uint8_t rxAlign);
-
-
-/**
- * Get MFRC522 version
- */
-const char *mfrc522_get_version_string(uint8_t version);
 
 /**
  * Clean up resources

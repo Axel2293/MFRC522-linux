@@ -4,12 +4,12 @@
  * MFRC522 RFID reader connected to a PICO-PI-IMX8MM via SPI.
  */
 
-#include "mfrc522.h"
+#include "../include/mfrc522.h"
 
 /**
  * Initialize GPIO for MFRC522
  */
-int mfrc522_init_gpio(mfrc522_device *dev)
+int mfrc522_init_gpio(mfrc522 *dev)
 {
     // Open GPIO chip
     dev->gpio_chip = gpiod_chip_open_by_name(GPIO_CHIP_NAME);
@@ -42,7 +42,7 @@ int mfrc522_init_gpio(mfrc522_device *dev)
 /**
  * Reset the MFRC522 using GPIO
  */
-void mfrc522_reset(mfrc522_device *dev)
+void mfrc522_reset(mfrc522 *dev)
 {
     // Reset sequence
     gpiod_line_set_value(dev->reset_line, 0); // Active low reset
@@ -54,7 +54,7 @@ void mfrc522_reset(mfrc522_device *dev)
 /**
  * Initialize SPI communication
  */
-int mfrc522_init_spi(mfrc522_device *dev)
+int mfrc522_init_spi(mfrc522 *dev)
 {
     int ret;
     uint8_t mode = SPI_MODE;
@@ -97,4 +97,49 @@ int mfrc522_init_spi(mfrc522_device *dev)
     }
 
     return 0;
+}
+
+/**
+ * Read one byte from the specified register in the MFRC522 chip
+ *  See 8.1.2.1 in the MFRC522 datasheet for details.
+ *  - The MSB of the register address is set to 1 to indicate a read operation (8.1.2.3).
+ */
+uint8_t mfrc522_read_register(mfrc522 *dev, uint8_t reg) {
+    uint8_t tx[2] = {MFRC522_READ_MSB | reg, 0};
+    uint8_t rx[2] = {0, 0};
+
+    struct spi_ioc_transfer tr = {
+        .tx_buf = (unsigned long)tx,
+        .rx_buf = (unsigned long)rx,
+        .len = 2,
+        .speed_hz = SPI_SPEED,
+        .bits_per_word = SPI_BITS_PER_WORD,
+        .delay_usecs = 0,
+    };
+
+    int ret = ioctl(dev->spi_fd, SPI_IOC_MESSAGE(1), &tr);
+    if (ret < 0) {
+        perror("Error in SPI transfer");
+        return 0;
+    }
+
+    // Second byte of the response contains the register byte
+    return rx[1];
+}
+
+/**
+ * Release resources
+ *  - Release the GPIO line and close the GPIO chip.
+ *  - Close the SPI device file descriptor.
+ */
+void mfrc522_cleanup(mfrc522 *dev)
+{
+    if (dev->reset_line)
+        gpiod_line_release(dev->reset_line);
+
+    if (dev->gpio_chip)
+        gpiod_chip_close(dev->gpio_chip);
+
+    if (dev->spi_fd >= 0)
+        close(dev->spi_fd);
 }

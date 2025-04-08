@@ -3,10 +3,11 @@
 
 int main()
 {
-    mfrc522_device dev = {
+    mfrc522 dev = {
         .spi_fd = -1,
         .gpio_chip = NULL,
-        .reset_line = NULL};
+        .reset_line = NULL
+    };
 
     printf("MFRC522\n");
     printf("----------------------\n");
@@ -32,11 +33,10 @@ int main()
 
     // Read version register
     printf("Reading version register...\n");
-    uint8_t version = mfrc522_read_register(&dev, MFRC522_REG_VERSION);
+    uint8_t version = mfrc522_read_register(&dev, VersionReg);
 
     // Display result
     printf("Version register value: 0x%02X\n", version);
-    printf("Device: %s\n", mfrc522_get_version_string(version));
 
     // Clean up
     mfrc522_cleanup(&dev);
