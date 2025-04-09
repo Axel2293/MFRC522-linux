@@ -120,11 +120,33 @@ uint8_t mfrc522_read_register(mfrc522 *dev, uint8_t reg) {
     int ret = ioctl(dev->spi_fd, SPI_IOC_MESSAGE(1), &tr);
     if (ret < 0) {
         perror("Error in SPI transfer");
-        return 0;
+        return EXIT_FAILURE;
     }
 
     // Second byte of the response contains the register byte
     return rx[1];
+}
+
+/**
+ * Write a byte to the specified register
+ */
+void mfrc522_write_register(mfrc522 *dev, uint8_t reg, uint8_t value) {
+  uint8_t tx[2] = {MFRC522_WRITE_MSB & reg, value};
+  uint8_t rx[2] = {0, 0};
+
+  struct spi_ioc_transfer tr = {
+      .tx_buf = (unsigned long) tx,
+      .rx_buf = (unsigned long) rx,
+      .len = 2,
+      .speed_hz = SPI_SPEED,
+      .bits_per_word = SPI_BITS_PER_WORD,
+      .delay_usecs = 0
+  };
+
+  if (ioctl(dev->spi_fd, SPI_IOC_MESSAGE(1), &tr) < 0) {
+      perror("Error in SPI transfer");
+      return EXIT_FAILURE;
+  }
 }
 
 /**
