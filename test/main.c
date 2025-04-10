@@ -38,6 +38,13 @@ int main()
     // Display result
     printf("Version register value: 0x%02X\n", version);
 
+
+    // Write into the FIFO
+    mfrc522_write_register(&dev, FIFODataReg, 0xBF);
+    // Read to see if write was done correctly
+    uint8_t data = mfrc522_read_register(&dev, FIFODataReg);
+    printf("Data retrieved: 0x%02X\n", data); 
+
     // Clean up
     mfrc522_cleanup(&dev);
     printf("Done.\n");

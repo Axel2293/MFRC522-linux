@@ -112,11 +112,11 @@ void mfrc522_reset(mfrc522 *dev);
 // Read one byte from the specified register in the MFRC522 chip
 uint8_t mfrc522_read_register(mfrc522 *dev, uint8_t reg);
 // Read multiple bytes from the specified register in the MFRC522 chip
-int mfrc522_read_register_multiple(mfrc522 *dev, uint8_t reg, uint8_t count, uint8_t *values, uint8_t rxAlign);
+//int mfrc522_read_register_multiple(mfrc522 *dev, uint8_t reg, uint8_t count, uint8_t *values, uint8_t rxAlign);
 // Write one byte to the specified register in the MFRC522 chip
 void mfrc522_write_register(mfrc522 *dev, uint8_t reg, uint8_t value);
 // Write multiple bytes to the specified register in the MFRC522 chip
-void mfrc522_write_register_multiple(mfrc522 *dev, uint8_t reg, uint8_t count, uint8_t *values);
+//void mfrc522_write_register_multiple(mfrc522 *dev, uint8_t reg, uint8_t count, uint8_t *values);
 
 /**
  * Clean up resources
