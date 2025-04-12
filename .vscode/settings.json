@@ -1,5 +1,6 @@
 {
     "files.associations": {
-        "mfrc522.h": "c"
+        "mfrc522.h": "c",
+        "temp": "cpp"
     }
 }
