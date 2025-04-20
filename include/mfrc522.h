@@ -153,7 +153,7 @@ typedef struct {
 /**
  * Initialize mfrc522 device
  */
-
+void mfrc522_antena_on(mfrc522 *dev);
 int mfrc522_init_gpio(mfrc522 *dev);
 int mfrc522_init_spi(mfrc522 *dev);
 void mfrc522_reset(mfrc522 *dev);
@@ -164,11 +164,44 @@ void mfrc522_reset(mfrc522 *dev);
 // Read one byte from the specified register in the MFRC522 chip
 uint8_t mfrc522_read_register(mfrc522 *dev, uint8_t reg);
 // Read multiple bytes from the specified register in the MFRC522 chip
-//int mfrc522_read_register_multiple(mfrc522 *dev, uint8_t reg, uint8_t count, uint8_t *values, uint8_t rxAlign);
+void mfrc522_read_register_multiple(
+    mfrc522 *dev,       ///< Pointer to the MFRC522 device structure
+    uint8_t reg,        ///< The register to read from
+    uint8_t count,      ///< The number of bytes to read
+    uint8_t *values,    ///< Pointer to the buffer to store the read values
+    uint8_t rxAlign     ///< The bit position in the first byte of the buffer to start reading
+);
 // Write one byte to the specified register in the MFRC522 chip
 void mfrc522_write_register(mfrc522 *dev, uint8_t reg, uint8_t value);
 // Write multiple bytes to the specified register in the MFRC522 chip
 //void mfrc522_write_register_multiple(mfrc522 *dev, uint8_t reg, uint8_t count, uint8_t *values);
+
+void mfrc522_clearRegisterBitMask(mfrc522 *dev, uint8_t reg, uint8_t mask);
+void mfrc522_setRegisterBitMask(mfrc522 *dev, uint8_t reg, uint8_t mask)
+
+uint8_t mfrc522_communicateWithPICC(
+    mfrc522 *dev,       ///< Pointer to the MFRC522 device structure
+    uint8_t command,    ///< The command to execute. One of the PCD_Command enums.
+    uint8_t waitIrq,    ///< The bits in the ComIrqReg register that signals successful completion of the command.
+    uint8_t *sendData,  ///< Pointer to the data to transfer to the FIFO.
+    uint8_t sendLen,    ///< Number of bytes to transfer to the FIFO.
+    uint8_t *backData,  ///< nullptr or pointer to buffer if data should be read back after executing the command.
+    uint8_t *backLen,   ///< In: Max number of bytes to write to *backData. Out: The number of bytes returned.
+    uint8_t *validBits, ///< In/Out: The number of valid bits in the last byte. 0 for 8 valid bits.
+    uint8_t rxAlign,    ///< In: Defines the bit position in backData[0] for the first bit received. Default 0.
+    bool checkCRC       ///< In: True => The last two bytes of the response is assumed to be a CRC_A that must be validated.
+);
+
+uint8_t mfrc522_transceive_data(
+    mfrc522 *dev,           
+    uint8_t *sendData,      // Pointer to the data to transfer to the FIFO.
+    uint8_t sendLen,        // Number of bytes to transfer to the FIFO.
+    uint8_t *backData,      // null ptr or pointer to the buffer if data should be read back after executing the command.
+    uint8_t *backLen,       // In: Max number of bytes to write to *backData. Out: The number of bytes returned.
+    uint8_t *validBits,     // In/Out: Number of valid bits in the last byte. 0 for 8 valid bits. Default nullptr.
+    uint8_t rxAlign,        // In: Defines the bit position in backData[0] for the first bit received. Default 0.
+    bool    checkCRC        // In: True => The last two bytes of the response is assumed to be a CRC_A that must be validated.
+);
 
 /**
  * Clean up resources
