@@ -127,12 +127,12 @@
 
 // SPI Configuration
 #define SPI_DEVICE "/dev/spidev1.0"
-#define SPI_SPEED 500000    // 1MHz
+#define SPI_SPEED 4000000u  // MFRC522 accept upto 10MHz, set to 4MHz.
 #define SPI_BITS_PER_WORD 8 // 8 bits per word
-#define SPI_MODE SPI_MODE_0 // SPI mode 0 (CPOL=0, CPHA=0)
+#define SPI_MODE SPI_MODE_0 // SPI mode 0
 
 // Flag for debugging
-#define DEBUG true
+#define DEBUG false
 
 // Status codes for MFRC522 operations
 typedef enum
@@ -159,6 +159,7 @@ typedef struct
 {
     uint8_t size;        // Number of bytes in the UID. 4, 7 or 10.
     uint8_t uidByte[10]; // Buffer to store the UID
+    uint8_t sak;         // The SAK (Select acknowledge) byte returned from the PICC after successful selection.
 } Uid;
 
 ///////////////////////////////////////////////////////////////////////////////////////////
@@ -208,6 +209,7 @@ uint8_t mfrc522_transceive_data(
     uint8_t *validBits,
     uint8_t rxAlign,
     bool checkCRC);
+uint8_t mfrc522_CalculateCRC(mfrc522 *dev, uint8_t *data, uint8_t length, uint8_t *result);
 bool mfrc522_isNewCardPresent(mfrc522 *dev);
 void mfrc522_cleanup(mfrc522 *dev);
 
@@ -217,5 +219,7 @@ void mfrc522_cleanup(mfrc522 *dev);
 
 uint8_t PICC_RequestA(mfrc522 *dev, uint8_t *bufferATQA, uint8_t *bufferSize);
 uint8_t PICC_REQA_or_WUPA(mfrc522 *dev, uint8_t command, uint8_t *bufferATQA, uint8_t *bufferSize);
+uint8_t PICC_Select(mfrc522 *dev, Uid *uid, uint8_t validBits);
+bool PICC_ReadCardSerial(mfrc522 *dev, Uid *uid);
 
 #endif /* MFRC522_H */

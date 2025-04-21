@@ -3,7 +3,8 @@
         "mfrc522.h": "c",
         "temp": "cpp",
         "ioctl.h": "c",
-        "ioctls.h": "c"
+        "ioctls.h": "c",
+        "cstddef": "c"
     },
     "makefile.configureOnOpen": false
 }
