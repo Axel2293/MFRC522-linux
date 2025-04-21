@@ -11,20 +11,11 @@ int main()
 
     printf("MFRC522\n");
     printf("----------------------\n");
-
-    // Initialize GPIO
-    if (mfrc522_init_gpio(&dev) != 0)
+    // Initialize the MFRC522 device
+    if (mfrc522_init(&dev) != 0)
     {
-        fprintf(stderr, "Failed to initialize GPIO\n");
-        return 1;
-    }
-
-    // Initialize SPI
-    if (mfrc522_init_spi(&dev) != 0)
-    {
-        fprintf(stderr, "Failed to initialize SPI\n");
-        mfrc522_cleanup(&dev);
-        return 1;
+        fprintf(stderr, "Failed to initialize MFRC522\n");
+        return -1;
     }
 
     // Reset the device
@@ -38,12 +29,16 @@ int main()
     // Display result
     printf("Version register value: 0x%02X\n", version);
 
-
-    // Write into the FIFO
-    mfrc522_write_register(&dev, FIFODataReg, 0xBF);
-    // Read to see if write was done correctly
-    uint8_t data = mfrc522_read_register(&dev, FIFODataReg);
-    printf("Data retrieved: 0x%02X\n", data); 
+    // Check if new card is present
+    printf("Checking for new card...\n");
+    while (true)
+    {
+        if (mfrc522_isNewCardPresent(&dev))
+        {
+            printf("New card detected!\n");
+        }
+    }
+    
 
     // Clean up
     mfrc522_cleanup(&dev);
