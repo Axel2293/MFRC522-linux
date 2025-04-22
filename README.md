@@ -2,7 +2,7 @@
 This project is focused on bringign an interface to interact with the MFRC522 chip on a PICO-PI-IMX8M-MINI running on a Kirkstone Linux distro.
 
 ## Key implementation concepts
-For this implementation the objective is to use the linux API to interact through the SPI protocol using the "linux/spi/spidev.h" interface.
+For this implementation, the objective is to use the Linux API to interact through the SPI protocol using the "linux/spi/spidev.h" interface. Also, the gpio pins are managed through the gpiod.h interface, which makes it simpler than using the "linux/gpio.h" interface.
 
 ## Pin layout
 Connected to the expansion IO on the board.
@@ -15,6 +15,9 @@ Connected to the expansion IO on the board.
 | GND         | GND         | Ground |
 | RST         | GPIO_P30       | Reset |
 | VCC         | 3.3V        | Power Supply |
+
+## Credits
+Full credits go to the miguelbalboa/rfid library for providing the implementations to interact with the mfrc522 and RFID cards.
 
 # Datasheet
 This is the link for the MFRC522 datasheet that was used for the implementation:
