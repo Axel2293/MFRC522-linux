@@ -17,7 +17,7 @@ Connected to the expansion IO on the board.
 | VCC         | 3.3V        | Power Supply |
 
 ## Credits
-Full credits go to the miguelbalboa/rfid library for providing the implementations to interact with the mfrc522 and RFID cards.
+Full credits go to the miguelbalboa/rfid library for providing the implementation to interact with the mfrc522 and RFID cards.
 
 # Datasheet
 This is the link for the MFRC522 datasheet that was used for the implementation:
