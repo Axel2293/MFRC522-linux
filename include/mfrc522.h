@@ -119,7 +119,7 @@
 // Use logicar OR to combine the register address with the read bit
 #define MFRC522_READ_MSB 0x80 // MSB for read operation
 // Use logical AND to combine the register address with the write bit
-#define MFRC522_WRITE_MSB 0x7F // MSB for write operation
+#define MFRC522_WRITE_MSB 0x7E // MSB for write operation
 
 // GPIO Configuration
 #define GPIO_CHIP_NAME "gpiochip2" // GPIO chip name that contains the reset pin (under /dev/gpiochipN)
@@ -179,14 +179,7 @@ void mfrc522_reset(mfrc522 *dev);
  * Register operations
  */
 uint8_t mfrc522_read_register(mfrc522 *dev, uint8_t reg);
-void mfrc522_read_register_multiple(
-    mfrc522 *dev,
-    uint8_t reg,
-    uint8_t count,
-    uint8_t *values,
-    uint8_t rxAlign);
 void mfrc522_write_register(mfrc522 *dev, uint8_t reg, uint8_t value);
-void mfrc522_write_register_multiple(mfrc522 *dev, uint8_t reg, uint8_t count, uint8_t *values);
 void mfrc522_clearRegisterBitMask(mfrc522 *dev, uint8_t reg, uint8_t mask);
 void mfrc522_setRegisterBitMask(mfrc522 *dev, uint8_t reg, uint8_t mask);
 uint8_t mfrc522_communicateWithPICC(
