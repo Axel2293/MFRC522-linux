@@ -69,14 +69,6 @@ int mfrc522_init_gpio(mfrc522 *dev)
         return -1;
     }
 
-    // Configure reset line as output with initial high state
-    if (gpiod_line_request_output(dev->reset_line, "mfrc522_reset", 1) < 0)
-    {
-        perror("Error configuring GPIO line");
-        gpiod_chip_close(dev->gpio_chip);
-        return -1;
-    }
-
     return 0;
 }
 
@@ -97,11 +89,49 @@ void mfrc522_antenna_on(mfrc522 *dev)
  */
 void mfrc522_reset(mfrc522 *dev)
 {
-    // Reset sequence
-    gpiod_line_set_value(dev->reset_line, 0); // Active low reset
-    usleep(10000);                            // Hold for 10ms
-    gpiod_line_set_value(dev->reset_line, 1); // Release reset
-    usleep(50000);                            // Wait 50ms for stabilization
+    bool hardReset = false;
+
+    // Set the reset line as input
+    gpiod_line_release(dev->reset_line);
+    if (gpiod_line_request_input(dev->reset_line, "mfrc522_reset") < 0)
+    {
+        perror("Error requesting GPIO line as input");
+        return;
+    }
+
+    // Check if reset line gpio is low
+    int value = gpiod_line_get_value(dev->reset_line);
+    if (value == 0)
+    {
+        // Set reset pin as output
+        gpiod_line_release(dev->reset_line);
+        if (gpiod_line_request_output(dev->reset_line, "mfrc522_reset", 0) < 0)
+        {
+            perror("Error requesting GPIO line as output");
+            return;
+        }
+        // Set reset line to low
+        gpiod_line_set_value(dev->reset_line, 0); // Active low reset
+        usleep(10000);                            // Hold for 10ms
+        gpiod_line_set_value(dev->reset_line, 1); // Release reset
+        usleep(50000);                            // Wait 50ms for stabilization
+        hardReset = true;
+        printf("Hard reset performed\n");
+    }
+
+    if (!hardReset)
+    {
+        mfrc522_write_register(dev, CommandReg, SoftReset); // Issue the SoftReset command.
+                                                            // The datasheet does not mention how long the SoftRest command takes to complete.
+                                                            // But the MFRC522 might have been in soft power-down mode (triggered by bit 4 of CommandReg)
+                                                            // Section 8.8.2 in the datasheet says the oscillator start-up time is the start up time of the crystal + 37,74μs. Let us be generous: 50ms.
+        uint8_t count = 0;
+        do
+        {
+            // Wait for the PowerDown bit in CommandReg to be cleared (max 3x50ms)
+            usleep(50000);
+        } while ((mfrc522_read_register(dev, CommandReg) & (1 << 4)) && (++count) < 3);
+    }
 }
 
 /**
@@ -159,8 +189,8 @@ int mfrc522_init_spi(mfrc522 *dev)
  */
 uint8_t mfrc522_read_register(mfrc522 *dev, uint8_t reg)
 {
-    uint8_t tx[2] = {MFRC522_READ_MSB | reg, 0};
-    uint8_t rx[2] = {0, 0};
+    uint8_t tx[2] = {MFRC522_READ_MSB | (reg & MFRC522_WRITE_MSB), 0};
+    uint8_t rx[2] = {0};
 
     struct spi_ioc_transfer tr = {
         .tx_buf = (unsigned long)tx,
@@ -183,42 +213,6 @@ uint8_t mfrc522_read_register(mfrc522 *dev, uint8_t reg)
 }
 
 /**
- * Read multiple bytes from the specified register in the MFRC522 chip
- *  - The MSB of the register address is set to 1 to indicate a read operation.
- */
-void mfrc522_read_register_multiple(mfrc522 *dev, uint8_t reg, uint8_t count, uint8_t *values, uint8_t rxAlign)
-{
-    // Create the address with the read bit set
-    uint8_t address = MFRC522_READ_MSB | reg;
-    uint8_t index = 0;
-    uint8_t *data = calloc(count + 1, sizeof(uint8_t));
-
-    struct spi_ioc_transfer tr = {
-        .tx_buf = (unsigned long)&address,
-        .rx_buf = (unsigned long)data,
-        .len = 1 + count,
-        .speed_hz = SPI_SPEED,
-        .bits_per_word = SPI_BITS_PER_WORD,
-        .delay_usecs = 0};
-
-    if (ioctl(dev->spi_fd, SPI_IOC_MESSAGE(1), &tr) < 0)
-    {
-        perror("Error in SPI transfer");
-        exit(EXIT_FAILURE);
-    }
-    // Copy the received data to the output buffer
-    memccpy(values, &data[1], 0, count);
-    // The first byte we dont care about
-    free(data);
-    // Apply alignment mask if needed
-    if (rxAlign)
-    {
-        uint8_t mask = (0xFF << rxAlign) & 0xFF;
-        values[0] = (values[0] & ~mask) | (values[1] & mask);
-    }
-}
-
-/**
  * Write a byte to the specified register
  */
 void mfrc522_write_register(mfrc522 *dev, uint8_t reg, uint8_t value)
@@ -229,31 +223,6 @@ void mfrc522_write_register(mfrc522 *dev, uint8_t reg, uint8_t value)
         .tx_buf = (unsigned long)tx,
         .rx_buf = (unsigned long)NULL,
         .len = 2,
-        .speed_hz = SPI_SPEED,
-        .bits_per_word = SPI_BITS_PER_WORD,
-        .delay_usecs = 0};
-
-    if (ioctl(dev->spi_fd, SPI_IOC_MESSAGE(1), &tr) < 0)
-    {
-        perror("Error in SPI transfer");
-        exit(EXIT_FAILURE);
-    }
-}
-
-/**
- * Write multiple bytes to the specified register
- *  - The MSB of the register address is set to 0 to indicate a write operation.
- */
-void mfrc522_write_register_multiple(mfrc522 *dev, uint8_t reg, uint8_t count, uint8_t *values)
-{
-    uint8_t tx[1 + count];
-    tx[0] = MFRC522_WRITE_MSB & reg;
-    memcpy(&tx[1], values, count);
-
-    struct spi_ioc_transfer tr = {
-        .tx_buf = (unsigned long)tx,
-        .rx_buf = (unsigned long)NULL,
-        .len = 1 + count,
         .speed_hz = SPI_SPEED,
         .bits_per_word = SPI_BITS_PER_WORD,
         .delay_usecs = 0};
@@ -296,12 +265,15 @@ uint8_t mfrc522_communicateWithPICC(
     uint8_t txLastBits = validBits ? *validBits : 0;
     uint8_t bitFraming = (rxAlign << 4) + txLastBits; // RxAlign = BitFramingReg[6..4]. TxLastBits = BitFramingReg[2..0]
 
-    mfrc522_write_register(dev, CommandReg, Idle);                        // Stop any active command.
-    mfrc522_write_register(dev, ComIrqReg, 0x7F);                         // Clear all seven interrupt request bits.
-    mfrc522_write_register(dev, FIFOLevelReg, 0x80);                      // FlushBuffer = 1, FIFO init.
-    mfrc522_write_register_multiple(dev, FIFODataReg, sendLen, sendData); // TODO: Implement multy byte write to register
-    mfrc522_write_register(dev, BitFramingReg, bitFraming);               // Bit adjustments.
-    mfrc522_write_register(dev, CommandReg, command);                     // Execute command.
+    mfrc522_write_register(dev, CommandReg, Idle);   // Stop any active command.
+    mfrc522_write_register(dev, ComIrqReg, 0x7F);    // Clear all seven interrupt request bits.
+    mfrc522_write_register(dev, FIFOLevelReg, 0x80); // FlushBuffer = 1, FIFO init.
+    for (size_t i = 0; i < sendLen; i++)
+    {
+        mfrc522_write_register(dev, FIFODataReg, sendData[i]); // Write sendData to the FIFO
+    }
+    mfrc522_write_register(dev, BitFramingReg, bitFraming); // Bit adjustments.
+    mfrc522_write_register(dev, CommandReg, command);       // Execute command.
 
     if (command == Transceive)
     {
@@ -318,7 +290,7 @@ uint8_t mfrc522_communicateWithPICC(
     // ~36ms, then consider the command as timed out.
 
     time_t start_time = time(NULL) * 1000; // Current time in milliseconds
-    time_t deadline = start_time + 37;
+    time_t deadline = start_time + 50;
     bool completed = false;
 
     do
@@ -333,7 +305,6 @@ uint8_t mfrc522_communicateWithPICC(
         { // Timer interrupt - nothing received in 25ms
             return STATUS_TIMEOUT;
         }
-        usleep(1000); // Sleep for 1ms instead
     } while ((time(NULL) * 1000) < deadline);
 
     if (!completed)
@@ -355,17 +326,16 @@ uint8_t mfrc522_communicateWithPICC(
     if (backData && backLen)
     {
         uint8_t n = mfrc522_read_register(dev, FIFOLevelReg); // Number of bytes in the FIFO
-        if (DEBUG)
-        {
-            printf("FIFOLevelReg: %d\n", n);
-        }
         if (n > *backLen)
         {
             return STATUS_NO_ROOM;
         }
         *backLen = n;
-        mfrc522_read_register_multiple(dev, FIFODataReg, n, backData, rxAlign); // Get received data from FIFO
-        _valBits = mfrc522_read_register(dev, ControlReg) & 0x07;               // RxLastBits[2:0] indicates the number of valid bits in the last received byte. If this value is 000b, the whole byte is valid.
+        for (size_t i = 0; i < n; i++)
+        {
+            backData[i] = mfrc522_read_register(dev, FIFODataReg); // Get received data from FIFO
+        }
+        _valBits = mfrc522_read_register(dev, ControlReg) & 0x07; // RxLastBits[2:0] indicates the number of valid bits in the last received byte. If this value is 000b, the whole byte is valid.
         if (validBits)
         {
             *validBits = _valBits;
@@ -416,35 +386,37 @@ uint8_t mfrc522_transceive_data(
 
 uint8_t mfrc522_CalculateCRC(mfrc522 *dev, uint8_t *data, uint8_t length, uint8_t *result)
 {
-    mfrc522_write_register(dev, CommandReg, Idle); // Stop any active command.
-    mfrc522_write_register(dev, DivIrqReg, 0x04);  // Clear the CRCIRq interrupt request bit
+    mfrc522_write_register(dev, CommandReg, Idle);       // Stop any active command.
+    mfrc522_write_register(dev, DivIrqReg, 0x04);        // Clear the CRCIRq interrupt request bit
     mfrc522_setRegisterBitMask(dev, FIFOLevelReg, 0x80); // FlushBuffer = 1, FIFO init.
-    mfrc522_write_register_multiple(dev, FIFODataReg, length, data); // Write data to the FIFO
+    for (size_t i = 0; i < length; i++)
+    {
+        mfrc522_write_register(dev, FIFODataReg, data[i]); // Write data to the FIFO
+    }
     mfrc522_write_register(dev, CommandReg, CalcCRC); // Start the CRC coprocessor
 
     // Wait for the CRC calculation to complete. Check for the register to
-	// indicate that the CRC calculation is complete in a loop. If the
-	// calculation is not indicated as complete in ~90ms, then time out
-	// the operation.
+    // indicate that the CRC calculation is complete in a loop. If the
+    // calculation is not indicated as complete in ~90ms, then time out
+    // the operation.
     const time_t deadline = time(NULL) * 1000 + 150;
 
-    do {
-		// DivIrqReg[7..0] bits are: Set2 reserved reserved MfinActIRq reserved CRCIRq reserved reserved
+    do
+    {
+        // DivIrqReg[7..0] bits are: Set2 reserved reserved MfinActIRq reserved CRCIRq reserved reserved
         uint8_t n = mfrc522_read_register(dev, DivIrqReg);
-        if (n & 0x04) {
+        if (n & 0x04)
+        {
             mfrc522_write_register(dev, CommandReg, Idle); // Stop calculating CRC for new content in the FIFO.
             // Transfer the result from the registers to the result buffer
-            result[0] = mfrc522_read_register(dev, CRCResultReg_1);
-            result[1] = mfrc522_read_register(dev, CRCResultReg_2);
-            printf("CRC OK: %02X %02X\n", result[0], result[1]);
+            result[0] = mfrc522_read_register(dev, CRCResultReg_2);
+            result[1] = mfrc522_read_register(dev, CRCResultReg_1);
             return STATUS_OK;
         }
         usleep(1000); // Sleep for 1ms instead
-    }
-    while ((time(NULL) * 1000) < deadline);
+    } while ((time(NULL) * 1000) < deadline);
 
     // Timeout
-    printf("Timeout in Calculate CRC\n");
     return STATUS_TIMEOUT;
 }
 
@@ -465,8 +437,7 @@ bool mfrc522_isNewCardPresent(mfrc522 *dev)
 
     if (DEBUG)
     {
-        printf("PICC_RequestA: RESULT: %02X\n", res);
-        printf("PICC_RequestA: %02X %02X\n", buff[0], buff[1]);
+        printf("IS NEW CARD PRESENT: %02X %02X\n", buff[0], buff[1]);
     }
     return (res == STATUS_OK || res == STATUS_COLLISION);
 }
@@ -539,26 +510,26 @@ uint8_t PICC_Select(mfrc522 *dev, Uid *uid, uint8_t validBits)
     uint8_t responseLength;
 
     // Description of buffer structure:
-	//		Byte 0: SEL 				Indicates the Cascade Level: PICC_CMD_SEL_CL1, PICC_CMD_SEL_CL2 or PICC_CMD_SEL_CL3
-	//		Byte 1: NVB					Number of Valid Bits (in complete command, not just the UID): High nibble: complete bytes, Low nibble: Extra bits. 
-	//		Byte 2: UID-data or CT		See explanation below. CT means Cascade Tag.
-	//		Byte 3: UID-data
-	//		Byte 4: UID-data
-	//		Byte 5: UID-data
-	//		Byte 6: BCC					Block Check Character - XOR of bytes 2-5
-	//		Byte 7: CRC_A
-	//		Byte 8: CRC_A
-	// The BCC and CRC_A are only transmitted if we know all the UID bits of the current Cascade Level.
-	//
-	// Description of bytes 2-5: (Section 6.5.4 of the ISO/IEC 14443-3 draft: UID contents and cascade levels)
-	//		UID size	Cascade level	Byte2	Byte3	Byte4	Byte5
-	//		========	=============	=====	=====	=====	=====
-	//		 4 bytes		1			uid0	uid1	uid2	uid3
-	//		 7 bytes		1			CT		uid0	uid1	uid2
-	//						2			uid3	uid4	uid5	uid6
-	//		10 bytes		1			CT		uid0	uid1	uid2
-	//						2			CT		uid3	uid4	uid5
-	//						3			uid6	uid7	uid8	uid9
+    //		Byte 0: SEL 				Indicates the Cascade Level: PICC_CMD_SEL_CL1, PICC_CMD_SEL_CL2 or PICC_CMD_SEL_CL3
+    //		Byte 1: NVB					Number of Valid Bits (in complete command, not just the UID): High nibble: complete bytes, Low nibble: Extra bits.
+    //		Byte 2: UID-data or CT		See explanation below. CT means Cascade Tag.
+    //		Byte 3: UID-data
+    //		Byte 4: UID-data
+    //		Byte 5: UID-data
+    //		Byte 6: BCC					Block Check Character - XOR of bytes 2-5
+    //		Byte 7: CRC_A
+    //		Byte 8: CRC_A
+    // The BCC and CRC_A are only transmitted if we know all the UID bits of the current Cascade Level.
+    //
+    // Description of bytes 2-5: (Section 6.5.4 of the ISO/IEC 14443-3 draft: UID contents and cascade levels)
+    //		UID size	Cascade level	Byte2	Byte3	Byte4	Byte5
+    //		========	=============	=====	=====	=====	=====
+    //		 4 bytes		1			uid0	uid1	uid2	uid3
+    //		 7 bytes		1			CT		uid0	uid1	uid2
+    //						2			uid3	uid4	uid5	uid6
+    //		10 bytes		1			CT		uid0	uid1	uid2
+    //						2			CT		uid3	uid4	uid5
+    //						3			uid6	uid7	uid8	uid9
 
     // Sanity checks
     if (validBits > 80)
@@ -567,164 +538,189 @@ uint8_t PICC_Select(mfrc522 *dev, Uid *uid, uint8_t validBits)
     }
 
     // Prepare the MFRC522
-    mfrc522_clearRegisterBitMask(dev, CollReg, 0x80);   // ValuesAfterColl=1 => Bits received after collision are cleared.
+    mfrc522_clearRegisterBitMask(dev, CollReg, 0x80); // ValuesAfterColl=1 => Bits received after collision are cleared.
 
     // Repeat Cascade Level loop until we have a complete UID.
     uidComplete = false;
     while (!uidComplete)
     {
-		// Set the Cascade Level in the SEL byte, find out if we need to use the Cascade Tag in byte 2.
+        // Set the Cascade Level in the SEL byte, find out if we need to use the Cascade Tag in byte 2.
         switch (cascadeLevel)
         {
-            case 1:
-                buffer[0] = PICC_CMD_SEL_CL1;
-                uidIndex = 0;
-                useCascadeTag = validBits && uid->size > 4; // When we know that the UID has more than 4 bytes
-                break;
-            case 2:
-                buffer[0] = PICC_CMD_SEL_CL2;
-                uidIndex = 3;
-                useCascadeTag = validBits && uid->size > 7; // When we know that the UID has more than 7 bytes
-            case 3:
-                buffer[0] = PICC_CMD_SEL_CL3;
-                uidIndex = 6;
-                useCascadeTag = false;                      // Never used in CL3.    
-            default:
-                return STATUS_INTERNAL_ERROR;
-                break;
+        case 1:
+            buffer[0] = PICC_CMD_SEL_CL1;
+            uidIndex = 0;
+            useCascadeTag = validBits && uid->size > 4; // When we know that the UID has more than 4 bytes
+            break;
+        case 2:
+            buffer[0] = PICC_CMD_SEL_CL2;
+            uidIndex = 3;
+            useCascadeTag = validBits && uid->size > 7; // When we know that the UID has more than 7 bytes
+        case 3:
+            buffer[0] = PICC_CMD_SEL_CL3;
+            uidIndex = 6;
+            useCascadeTag = false; // Never used in CL3.
+        default:
+            return STATUS_INTERNAL_ERROR;
+            break;
         }
 
         // How many UID bits are known in this Cascade Level?
         currentLevelKnownBits = validBits - (8 * uidIndex);
-        if (currentLevelKnownBits < 0) {
+        if (currentLevelKnownBits < 0)
+        {
             currentLevelKnownBits = 0;
         }
         // Copy the known bits from uid->uidByte[] to buffer[]
-        index = 2;  // destination index in buffer[]
-        if (useCascadeTag) {
+        index = 2; // destination index in buffer[]
+        if (useCascadeTag)
+        {
             buffer[index++] = PICC_CMD_CT;
         }
         uint8_t bytesToCopy = currentLevelKnownBits / 8 + (currentLevelKnownBits % 8 ? 1 : 0);
-        if (bytesToCopy) {
+        if (bytesToCopy)
+        {
             uint8_t maxBytes = useCascadeTag ? 3 : 4; // Max 4 bytes in each Cascade Level. Only 3 left if we use the Cascade Tag
-            if (bytesToCopy > maxBytes) {
+            if (bytesToCopy > maxBytes)
+            {
                 bytesToCopy = maxBytes;
             }
-            for (count = 0; count < bytesToCopy; count++) {
+            for (count = 0; count < bytesToCopy; count++)
+            {
                 buffer[index++] = uid->uidByte[uidIndex + count];
             }
         }
-		// Now that the data has been copied we need to include the 8 bits in CT in currentLevelKnownBits
-        if (useCascadeTag) {
-            currentLevelKnownBits +=8;
+        // Now that the data has been copied we need to include the 8 bits in CT in currentLevelKnownBits
+        if (useCascadeTag)
+        {
+            currentLevelKnownBits += 8;
         }
 
         // Repeat anti collision loop until we can transmit all UID bits + BCC and receive a SAK - max 32 iterations.
         selectDone = false;
-        while (!selectDone) {
+        while (!selectDone)
+        {
             // Find out how many bits and bytes to send and receive.
-			if (currentLevelKnownBits >= 32) { // All UID bits in this Cascade Level are known. This is a SELECT.
-				buffer[1] = 0x70; // NVB - Number of Valid Bits: Seven whole bytes
-				// Calculate BCC - Block Check Character
-				buffer[6] = buffer[2] ^ buffer[3] ^ buffer[4] ^ buffer[5];
-				// Calculate CRC_A
-				result = mfrc522_CalculateCRC(dev, buffer, 7, &buffer[7]);  //TODO
-				if (result != STATUS_OK) {
-					return result;
-				}
-				txLastBits		= 0; // 0 => All 8 bits are valid.
-				bufferUsed		= 9;
-				// Store response in the last 3 bytes of buffer (BCC and CRC_A - not needed after tx)
-				responseBuffer	= &buffer[6];
-				responseLength	= 3;
-			}
-			else { // This is an ANTICOLLISION.
-				txLastBits		= currentLevelKnownBits % 8;
-				count			= currentLevelKnownBits / 8;	// Number of whole bytes in the UID part.
-				index			= 2 + count;					// Number of whole bytes: SEL + NVB + UIDs
-				buffer[1]		= (index << 4) + txLastBits;	// NVB - Number of Valid Bits
-				bufferUsed		= index + (txLastBits ? 1 : 0);
-				// Store response in the unused part of buffer
-				responseBuffer	= &buffer[index];
-				responseLength	= sizeof(buffer) - index;
-			}
+            if (currentLevelKnownBits >= 32)
+            {                     // All UID bits in this Cascade Level are known. This is a SELECT.
+                buffer[1] = 0x70; // NVB - Number of Valid Bits: Seven whole bytes
+                // Calculate BCC - Block Check Character
+                buffer[6] = buffer[2] ^ buffer[3] ^ buffer[4] ^ buffer[5];
+                // Calculate CRC_A
+                result = mfrc522_CalculateCRC(dev, buffer, 7, &buffer[7]); // TODO
+                if (result != STATUS_OK)
+                {
+                    return result;
+                }
+                txLastBits = 0; // 0 => All 8 bits are valid.
+                bufferUsed = 9;
+                // Store response in the last 3 bytes of buffer (BCC and CRC_A - not needed after tx)
+                responseBuffer = &buffer[6];
+                responseLength = 3;
+            }
+            else
+            { // This is an ANTICOLLISION.
+                txLastBits = currentLevelKnownBits % 8;
+                count = currentLevelKnownBits / 8;     // Number of whole bytes in the UID part.
+                index = 2 + count;                     // Number of whole bytes: SEL + NVB + UIDs
+                buffer[1] = (index << 4) + txLastBits; // NVB - Number of Valid Bits
+                bufferUsed = index + (txLastBits ? 1 : 0);
+                // Store response in the unused part of buffer
+                responseBuffer = &buffer[index];
+                responseLength = sizeof(buffer) - index;
+            }
 
             // Set bit adjustments
-			rxAlign = txLastBits;											// Having a separate variable is overkill. But it makes the next line easier to read.
-			mfrc522_write_register(dev, BitFramingReg, (rxAlign << 4) + txLastBits);	// RxAlign = BitFramingReg[6..4]. TxLastBits = BitFramingReg[2..0]
-			
-			// Transmit the buffer and receive the response.
-			result = mfrc522_transceive_data(dev, buffer, bufferUsed, responseBuffer, &responseLength, &txLastBits, rxAlign, false);
-			if (result == STATUS_COLLISION) { // More than one PICC in the field => collision.
-				uint8_t valueOfCollReg = mfrc522_read_register(dev, CollReg); // CollReg[7..0] bits are: ValuesAfterColl reserved CollPosNotValid CollPos[4:0]
-				if (valueOfCollReg & 0x20) { // CollPosNotValid
-					return STATUS_COLLISION; // Without a valid collision position we cannot continue
-				}
-				uint8_t collisionPos = valueOfCollReg & 0x1F; // Values 0-31, 0 means bit 32.
-				if (collisionPos == 0) {
-					collisionPos = 32;
-				}
-				if (collisionPos <= currentLevelKnownBits) { // No progress - should not happen 
-					return STATUS_INTERNAL_ERROR;
-				}
-				// Choose the PICC with the bit set.
-				currentLevelKnownBits	= collisionPos;
-				count			= currentLevelKnownBits % 8; // The bit to modify
-				checkBit		= (currentLevelKnownBits - 1) % 8;
-				index			= 1 + (currentLevelKnownBits / 8) + (count ? 1 : 0); // First byte is index 0.
-				buffer[index]	|= (1 << checkBit);
-			}
-			else if (result != STATUS_OK) {
-				return result;
-			}
-			else { // STATUS_OK
-				if (currentLevelKnownBits >= 32) { // This was a SELECT.
-					selectDone = true; // No more anticollision 
-					// We continue below outside the while.
-				}
-				else { // This was an ANTICOLLISION.
-					// We now have all 32 bits of the UID in this Cascade Level
-					currentLevelKnownBits = 32;
-					// Run loop again to do the SELECT.
-				}
-			}
+            rxAlign = txLastBits;                                                    // Having a separate variable is overkill. But it makes the next line easier to read.
+            mfrc522_write_register(dev, BitFramingReg, (rxAlign << 4) + txLastBits); // RxAlign = BitFramingReg[6..4]. TxLastBits = BitFramingReg[2..0]
+
+            // Transmit the buffer and receive the response.
+
+            result = mfrc522_transceive_data(dev, buffer, bufferUsed, responseBuffer, &responseLength, &txLastBits, rxAlign, false);
+            if (result == STATUS_COLLISION)
+            {                                                                 // More than one PICC in the field => collision.
+                uint8_t valueOfCollReg = mfrc522_read_register(dev, CollReg); // CollReg[7..0] bits are: ValuesAfterColl reserved CollPosNotValid CollPos[4:0]
+                if (valueOfCollReg & 0x20)
+                {                            // CollPosNotValid
+                    return STATUS_COLLISION; // Without a valid collision position we cannot continue
+                }
+                uint8_t collisionPos = valueOfCollReg & 0x1F; // Values 0-31, 0 means bit 32.
+                if (collisionPos == 0)
+                {
+                    collisionPos = 32;
+                }
+                if (collisionPos <= currentLevelKnownBits)
+                { // No progress - should not happen
+                    return STATUS_INTERNAL_ERROR;
+                }
+                // Choose the PICC with the bit set.
+                currentLevelKnownBits = collisionPos;
+                count = currentLevelKnownBits % 8; // The bit to modify
+                checkBit = (currentLevelKnownBits - 1) % 8;
+                index = 1 + (currentLevelKnownBits / 8) + (count ? 1 : 0); // First byte is index 0.
+                buffer[index] |= (1 << checkBit);
+            }
+            else if (result != STATUS_OK)
+            {
+                return result;
+            }
+            else
+            { // STATUS_OK
+                if (currentLevelKnownBits >= 32)
+                {                      // This was a SELECT.
+                    selectDone = true; // No more anticollision
+                                       // We continue below outside the while.
+                }
+                else
+                { // This was an ANTICOLLISION.
+                    // We now have all 32 bits of the UID in this Cascade Level
+                    currentLevelKnownBits = 32;
+                    // Run loop again to do the SELECT.
+                }
+            }
         } // End of while (!selectDone)
 
         // We do not check the CBB - it was constructed by us above.
-		
-		// Copy the found UID bytes from buffer[] to uid->uidByte[]
-		index			= (buffer[2] == PICC_CMD_CT) ? 3 : 2; // source index in buffer[]
-		bytesToCopy		= (buffer[2] == PICC_CMD_CT) ? 3 : 4;
-		for (count = 0; count < bytesToCopy; count++) {
-			uid->uidByte[uidIndex + count] = buffer[index++];
-		}
+
+        // Copy the found UID bytes from buffer[] to uid->uidByte[]
+        index = (buffer[2] == PICC_CMD_CT) ? 3 : 2; // source index in buffer[]
+        bytesToCopy = (buffer[2] == PICC_CMD_CT) ? 3 : 4;
+        for (count = 0; count < bytesToCopy; count++)
+        {
+            uid->uidByte[uidIndex + count] = buffer[index++];
+        }
 
         // Check response SAK (Select Acknowledge)
-		if (responseLength != 3 || txLastBits != 0) { // SAK must be exactly 24 bits (1 byte + CRC_A).
-			return STATUS_ERROR;
-		}
-		// Verify CRC_A - do our own calculation and store the control in buffer[2..3] - those bytes are not needed anymore.
-		result = mfrc522_CalculateCRC(dev, responseBuffer, 1, &buffer[2]);
-		if (result != STATUS_OK) {
-			return result;
-		}
-		if ((buffer[2] != responseBuffer[1]) || (buffer[3] != responseBuffer[2])) {
-			return STATUS_CRC_WRONG;
-		}
-		if (responseBuffer[0] & 0x04) { // Cascade bit set - UID not complete yes
-			cascadeLevel++;
-		}
-		else {
-			uidComplete = true;
-			uid->sak = responseBuffer[0];
-		}
-    }   // End of while (!uidComplete)
+        if (responseLength != 3 || txLastBits != 0)
+        { // SAK must be exactly 24 bits (1 byte + CRC_A).
+            return STATUS_ERROR;
+        }
+        // Verify CRC_A - do our own calculation and store the control in buffer[2..3] - those bytes are not needed anymore.
+        result = mfrc522_CalculateCRC(dev, responseBuffer, 1, &buffer[2]);
+        if (result != STATUS_OK)
+        {
+            return result;
+        }
+        if ((buffer[2] != responseBuffer[1]) || (buffer[3] != responseBuffer[2]))
+        {
+            return STATUS_CRC_WRONG;
+        }
+        if (responseBuffer[0] & 0x04)
+        { // Cascade bit set - UID not complete yes
+            cascadeLevel++;
+        }
+        else
+        {
+            uidComplete = true;
+            uid->sak = responseBuffer[0];
+        }
+    } // End of while (!uidComplete)
 
     // Set correct uid->size
-	uid->size = 3 * cascadeLevel + 1;
+    uid->size = 3 * cascadeLevel + 1;
 
-	return STATUS_OK;
- }
+    return STATUS_OK;
+}
 
 bool PICC_ReadCardSerial(mfrc522 *dev, Uid *uid)
 {
