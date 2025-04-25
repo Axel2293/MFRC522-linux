@@ -153,7 +153,7 @@ typedef struct
     int spi_fd;
     struct gpiod_chip *gpio_chip;
     struct gpiod_line *reset_line;
-} mfrc522;
+} Mfrc522;
 
 typedef struct
 {
@@ -167,23 +167,23 @@ typedef struct
 ///////////////////////////////////////////////////////////////////////////////////////////
 
 /**
- * Initialize mfrc522 device
+ * Initialize Mfrc522 device
  */
-int mfrc522_init(mfrc522 *dev);
-void mfrc522_antenna_on(mfrc522 *dev);
-int mfrc522_init_gpio(mfrc522 *dev);
-int mfrc522_init_spi(mfrc522 *dev);
-void mfrc522_reset(mfrc522 *dev);
+int mfrc522_init(Mfrc522 *dev);
+void mfrc522_antenna_on(Mfrc522 *dev);
+int mfrc522_init_gpio(Mfrc522 *dev);
+int mfrc522_init_spi(Mfrc522 *dev);
+void mfrc522_reset(Mfrc522 *dev);
 
 /**
  * Register operations
  */
-uint8_t mfrc522_read_register(mfrc522 *dev, uint8_t reg);
-void mfrc522_write_register(mfrc522 *dev, uint8_t reg, uint8_t value);
-void mfrc522_clearRegisterBitMask(mfrc522 *dev, uint8_t reg, uint8_t mask);
-void mfrc522_setRegisterBitMask(mfrc522 *dev, uint8_t reg, uint8_t mask);
+uint8_t mfrc522_read_register(Mfrc522 *dev, uint8_t reg);
+void mfrc522_write_register(Mfrc522 *dev, uint8_t reg, uint8_t value);
+void mfrc522_clearRegisterBitMask(Mfrc522 *dev, uint8_t reg, uint8_t mask);
+void mfrc522_setRegisterBitMask(Mfrc522 *dev, uint8_t reg, uint8_t mask);
 uint8_t mfrc522_communicateWithPICC(
-    mfrc522 *dev,
+    Mfrc522 *dev,
     uint8_t command,
     uint8_t waitIrq,
     uint8_t *sendData,
@@ -194,7 +194,7 @@ uint8_t mfrc522_communicateWithPICC(
     uint8_t rxAlign,
     bool checkCRC);
 uint8_t mfrc522_transceive_data(
-    mfrc522 *dev,
+    Mfrc522 *dev,
     uint8_t *sendData,
     uint8_t sendLen,
     uint8_t *backData,
@@ -202,17 +202,17 @@ uint8_t mfrc522_transceive_data(
     uint8_t *validBits,
     uint8_t rxAlign,
     bool checkCRC);
-uint8_t mfrc522_CalculateCRC(mfrc522 *dev, uint8_t *data, uint8_t length, uint8_t *result);
-bool mfrc522_isNewCardPresent(mfrc522 *dev);
-void mfrc522_cleanup(mfrc522 *dev);
+uint8_t mfrc522_CalculateCRC(Mfrc522 *dev, uint8_t *data, uint8_t length, uint8_t *result);
+bool mfrc522_isNewCardPresent(Mfrc522 *dev);
+void mfrc522_cleanup(Mfrc522 *dev);
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 // PICC Functions
 ///////////////////////////////////////////////////////////////////////////////////////////
 
-uint8_t PICC_RequestA(mfrc522 *dev, uint8_t *bufferATQA, uint8_t *bufferSize);
-uint8_t PICC_REQA_or_WUPA(mfrc522 *dev, uint8_t command, uint8_t *bufferATQA, uint8_t *bufferSize);
-uint8_t PICC_Select(mfrc522 *dev, Uid *uid, uint8_t validBits);
-bool PICC_ReadCardSerial(mfrc522 *dev, Uid *uid);
+uint8_t PICC_RequestA(Mfrc522 *dev, uint8_t *bufferATQA, uint8_t *bufferSize);
+uint8_t PICC_REQA_or_WUPA(Mfrc522 *dev, uint8_t command, uint8_t *bufferATQA, uint8_t *bufferSize);
+uint8_t PICC_Select(Mfrc522 *dev, Uid *uid, uint8_t validBits);
+bool PICC_ReadCardSerial(Mfrc522 *dev, Uid *uid);
 
 #endif /* MFRC522_H */

@@ -15,7 +15,7 @@
  *  Reset ModWidthReg
  *  Set timeout config
  */
-int mfrc522_init(mfrc522 *dev)
+int mfrc522_init(Mfrc522 *dev)
 {
     // Initialize GPIO and SPI
     if (mfrc522_init_gpio(dev) != 0)
@@ -50,7 +50,7 @@ int mfrc522_init(mfrc522 *dev)
 /**
  * Initialize GPIO for MFRC522
  */
-int mfrc522_init_gpio(mfrc522 *dev)
+int mfrc522_init_gpio(Mfrc522 *dev)
 {
     // Open GPIO chip
     dev->gpio_chip = gpiod_chip_open_by_name(GPIO_CHIP_NAME);
@@ -75,7 +75,7 @@ int mfrc522_init_gpio(mfrc522 *dev)
 /**
  * Turn on the antenna
  */
-void mfrc522_antenna_on(mfrc522 *dev)
+void mfrc522_antenna_on(Mfrc522 *dev)
 {
     uint8_t value = mfrc522_read_register(dev, TxControlReg);
     if ((value & 0x03) != 0x03)
@@ -87,7 +87,7 @@ void mfrc522_antenna_on(mfrc522 *dev)
 /**
  * Reset the MFRC522 using GPIO
  */
-void mfrc522_reset(mfrc522 *dev)
+void mfrc522_reset(Mfrc522 *dev)
 {
     bool hardReset = false;
 
@@ -137,7 +137,7 @@ void mfrc522_reset(mfrc522 *dev)
 /**
  * Initialize SPI communication
  */
-int mfrc522_init_spi(mfrc522 *dev)
+int mfrc522_init_spi(Mfrc522 *dev)
 {
     int ret;
     uint8_t mode = SPI_MODE;
@@ -187,7 +187,7 @@ int mfrc522_init_spi(mfrc522 *dev)
  *  See 8.1.2.1 in the MFRC522 datasheet for details.
  *  - The MSB of the register address is set to 1 to indicate a read operation (8.1.2.3).
  */
-uint8_t mfrc522_read_register(mfrc522 *dev, uint8_t reg)
+uint8_t mfrc522_read_register(Mfrc522 *dev, uint8_t reg)
 {
     uint8_t tx[2] = {MFRC522_READ_MSB | (reg & MFRC522_WRITE_MSB), 0};
     uint8_t rx[2] = {0};
@@ -215,7 +215,7 @@ uint8_t mfrc522_read_register(mfrc522 *dev, uint8_t reg)
 /**
  * Write a byte to the specified register
  */
-void mfrc522_write_register(mfrc522 *dev, uint8_t reg, uint8_t value)
+void mfrc522_write_register(Mfrc522 *dev, uint8_t reg, uint8_t value)
 {
     uint8_t tx[2] = {MFRC522_WRITE_MSB & reg, value};
 
@@ -234,7 +234,7 @@ void mfrc522_write_register(mfrc522 *dev, uint8_t reg, uint8_t value)
     }
 }
 
-void mfrc522_clearRegisterBitMask(mfrc522 *dev, uint8_t reg, uint8_t mask)
+void mfrc522_clearRegisterBitMask(Mfrc522 *dev, uint8_t reg, uint8_t mask)
 {
     uint8_t tmp = mfrc522_read_register(dev, reg);
 
@@ -243,7 +243,7 @@ void mfrc522_clearRegisterBitMask(mfrc522 *dev, uint8_t reg, uint8_t mask)
     mfrc522_write_register(dev, reg, tmp);
 }
 
-void mfrc522_setRegisterBitMask(mfrc522 *dev, uint8_t reg, uint8_t mask)
+void mfrc522_setRegisterBitMask(Mfrc522 *dev, uint8_t reg, uint8_t mask)
 {
     uint8_t tmp = mfrc522_read_register(dev, reg);
 
@@ -251,7 +251,7 @@ void mfrc522_setRegisterBitMask(mfrc522 *dev, uint8_t reg, uint8_t mask)
 }
 
 uint8_t mfrc522_communicateWithPICC(
-    mfrc522 *dev,
+    Mfrc522 *dev,
     uint8_t command,
     uint8_t waitIrq,
     uint8_t *sendData,
@@ -370,7 +370,7 @@ uint8_t mfrc522_communicateWithPICC(
 }
 
 uint8_t mfrc522_transceive_data(
-    mfrc522 *dev,
+    Mfrc522 *dev,
     uint8_t *sendData,  // Pointer to the data to transfer to the FIFO.
     uint8_t sendLen,    // Number of bytes to transfer to the FIFO.
     uint8_t *backData,  // null ptr or pointer to the buffer if data should be read back after executing the command.
@@ -384,7 +384,7 @@ uint8_t mfrc522_transceive_data(
     return mfrc522_communicateWithPICC(dev, Transceive, waitIRq, sendData, sendLen, backData, backLen, validBits, rxAlign, checkCRC);
 }
 
-uint8_t mfrc522_CalculateCRC(mfrc522 *dev, uint8_t *data, uint8_t length, uint8_t *result)
+uint8_t mfrc522_CalculateCRC(Mfrc522 *dev, uint8_t *data, uint8_t length, uint8_t *result)
 {
     mfrc522_write_register(dev, CommandReg, Idle);       // Stop any active command.
     mfrc522_write_register(dev, DivIrqReg, 0x04);        // Clear the CRCIRq interrupt request bit
@@ -420,7 +420,7 @@ uint8_t mfrc522_CalculateCRC(mfrc522 *dev, uint8_t *data, uint8_t length, uint8_
     return STATUS_TIMEOUT;
 }
 
-bool mfrc522_isNewCardPresent(mfrc522 *dev)
+bool mfrc522_isNewCardPresent(Mfrc522 *dev)
 {
     uint8_t buff[2] = {0, 0};
     uint8_t size = sizeof(buff);
@@ -442,7 +442,7 @@ bool mfrc522_isNewCardPresent(mfrc522 *dev)
     return (res == STATUS_OK || res == STATUS_COLLISION);
 }
 
-void mfrc522_cleanup(mfrc522 *dev)
+void mfrc522_cleanup(Mfrc522 *dev)
 {
     if (dev->reset_line)
         gpiod_line_release(dev->reset_line);
@@ -454,12 +454,12 @@ void mfrc522_cleanup(mfrc522 *dev)
         close(dev->spi_fd);
 }
 
-uint8_t PICC_RequestA(mfrc522 *dev, uint8_t *bufferATQA, uint8_t *bufferSize)
+uint8_t PICC_RequestA(Mfrc522 *dev, uint8_t *bufferATQA, uint8_t *bufferSize)
 {
     return PICC_REQA_or_WUPA(dev, PICC_CMD_REQA, bufferATQA, bufferSize);
 }
 
-uint8_t PICC_REQA_or_WUPA(mfrc522 *dev, uint8_t command, uint8_t *bufferATQA, uint8_t *bufferSize)
+uint8_t PICC_REQA_or_WUPA(Mfrc522 *dev, uint8_t command, uint8_t *bufferATQA, uint8_t *bufferSize)
 {
     uint8_t validBits;
     int status;
@@ -490,7 +490,7 @@ uint8_t PICC_REQA_or_WUPA(mfrc522 *dev, uint8_t command, uint8_t *bufferATQA, ui
     return STATUS_OK;
 }
 
-uint8_t PICC_Select(mfrc522 *dev, Uid *uid, uint8_t validBits)
+uint8_t PICC_Select(Mfrc522 *dev, Uid *uid, uint8_t validBits)
 {
     bool uidComplete;
     bool selectDone;
@@ -722,7 +722,7 @@ uint8_t PICC_Select(mfrc522 *dev, Uid *uid, uint8_t validBits)
     return STATUS_OK;
 }
 
-bool PICC_ReadCardSerial(mfrc522 *dev, Uid *uid)
+bool PICC_ReadCardSerial(Mfrc522 *dev, Uid *uid)
 {
     uint8_t result = PICC_Select(dev, uid, 0);
     printf("PICC_Select: %02X\n", result);

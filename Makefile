@@ -2,7 +2,7 @@
 # Use the pokytoolchain compiler
 #	First, do source /opt/fsl-imx-xwayland/5.15-kirkstone/environment-setup-armv8a-poky-linux
 CC ?= gcc
-LDFLAGS = -lgpiod
+LDFLAGS = -lgpiod 
 
 SRC_DIR = src
 TEST_DIR = test
@@ -15,7 +15,7 @@ OBJ_FILES = $(SRC_FILES:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
 TEST_OBJ = $(TEST_FILES:$(TEST_DIR)/%.c=$(OBJ_DIR)/%.o)
 
 # Final executable
-TARGET = mfrc522_test
+TARGET = mfrc522_module
 
 all: $(TARGET)
 
