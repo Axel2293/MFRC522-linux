@@ -15,7 +15,7 @@ OBJ_FILES = $(SRC_FILES:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
 TEST_OBJ = $(TEST_FILES:$(TEST_DIR)/%.c=$(OBJ_DIR)/%.o)
 
 # Final executable
-TARGET = mfrc522_module
+TARGET = ./project_prototype/mfrc522_module
 
 all: $(TARGET)
 

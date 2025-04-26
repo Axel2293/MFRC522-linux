@@ -4,6 +4,9 @@ import time
 import os
 import sys
 import subprocess
+import base64
+import json
+#import requests
 
 # Define error codes
 # Error code constants
@@ -17,7 +20,7 @@ MFRC522_PROCESS_ERROR = 6
 SOCKET_ERROR = 7
 
 class ControlAccessSystem:
-    def __init__(self, host='127.0.0.1', port=26999):
+    def __init__(self, host='127.0.0.1', port=20077):
         """Initialize the Control Access System."""
         # Print project logo
         self.print_logo()
@@ -48,35 +51,38 @@ class ControlAccessSystem:
         self.module_connection, self.module_add = self.server_socket.accept()
         print(f"[+] Connection from {self.module_add}")
 
-        # Recieve the OK command
+        # Recieve the OK signal
         try:
-            data = self.module_connection.recv(1024).decode('utf-8')
-            if data == "OK":
-                print("[+] MFRC522 reader is active")
+            data = self.module_connection.recv(1024).decode("utf-8")
+            if "OK" in data:
+                print(f"[+] MFRC522 reader is active {data}")
             else:
                 print(f"[-] Unexpected data received: {data}")
                 exit(ERROR_UNKNOWN)
         except socket.error as e:
-            print(f"[-] Socket error: {e}")
+            print(f"[-] Socket error while recieving for OK: {e}")
             exit(SOCKET_ERROR)
 
-        self.listen_for_picc_uid()
+        # Recieve the reader version
+        try:
+            version= self.module_connection.recv(1024).decode("utf-8")
+            if version:
+                print(f"[+] reader version: {version}")
+        except socket.error as e:
+            print(f"[-] Socket error while : {e}")
+            exit(SOCKET_ERROR)
+        # Main loop (Check for cards UID and face recognition)
+        while True:
+            uid_base64 = self.wait_till_card_uid()
+            # TODO - Integrate logic to verify Face ID
 
-        
-
-        # TODO - Integrate logic to verify Face ID
-
-        # Close the connection
-        self.module_connection.close()
         # Close the server
         self.stop_server()
 
-    def listen_for_picc_uid(self):
-        """Listen for PICC UID from the MFRC522 process."""
-        # Listen for incoming connections
-        data = self.module_connection.recv(1024).decode('utf-8')
-        if data:
-            print(f"[+] Received data: {data}")
+        # Stop mfrc522_modue
+        self.stop_mfrc522_process()
+        
+        
 
     def print_logo(self):
         """Print the project logo."""
@@ -112,6 +118,10 @@ class ControlAccessSystem:
             self.module_log_fd.flush()
             self.module_log_fd.close()
             print("[*] Log file flushed and closed")
+        
+        if self.module_connection:
+            self.module_connection.close()
+            print("[*] Module connection closed")
 
         if self.server_socket:
             self.server_socket.close()
@@ -132,8 +142,8 @@ class ControlAccessSystem:
         
         self.module =  subprocess.Popen(
             ["./mfrc522_module", str(self.port)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stdout= subprocess.PIPE,
+            stderr= subprocess.PIPE
         )
         print("[*] MFRC522 process started")
         time.sleep(1)
@@ -160,6 +170,36 @@ class ControlAccessSystem:
             return MFRC522_PROCESS_ERROR
         finally:
             print("[*] MFRC522 process stopped")
+
+    # /////////////////////////// Card UID Utils ////////////////////////////
+    def wait_till_card_uid(self) -> str:
+        """Wait to recieve a UID through sockets and return it in base64"""
+        data_serialized = self.module_connection.recv(1024).decode('utf-8')
+        if data_serialized:
+            """ The mfrc522 sends a JSON with the UID as a HEX String and the lenght"""
+            # Parse response
+            data_deserialized = json.loads(data_serialized)
+            print(f"[*] Received data: {data_deserialized}")
+            
+            # Get uid in bytes
+            uid_hex = data_deserialized.get("uid")
+            uid_bytes = self.uid_hex_to_bytes(uid_hex)
+
+            # Encode the UID to base64
+            uid_base64 = self.uid_bytes_to_base64(uid_bytes)
+            print(f"[*] UID in base64: {uid_base64}")
+            return uid_base64
+        return None
+
+    def uid_hex_to_bytes(self, uid_hex: str) -> bytes:
+        # Decode the UID from hex to bytes
+        return bytes.fromhex(uid_hex)
+
+    def uid_bytes_to_base64(self, uid_bytes: bytes) -> str:
+        return base64.b64encode(uid_bytes).decode('utf-8')
+
+
+
 
 
 def main():

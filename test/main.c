@@ -15,6 +15,8 @@ typedef enum
     ERROR_SOCKET_CLEANUP,
     ERROR_PICC_UID, // MFRC522 reader errors
     ERROR_MFRC522_INIT,
+    ERROR_MFRC522_READ,
+    ERROR_MFRC522_WRITE,
     ERROR_MFRC522_TEST
 } StatusCodes;
 
@@ -35,11 +37,17 @@ typedef struct
 //////////////////////////////////////////////////////
 // Module utils
 //////////////////////////////////////////////////////
-void print_to_log(FILE *log_file, const char *message);
+void print_to_log(FILE *log_file, const char *message);        // Print the given string to the logs file descriptor
+void free_resources(Mfrc522 *dev, Socket *sock, FILE *logFile);     // Free up resources
 
 //////////////////////////////////////////////////////
 // Module style
 //////////////////////////////////////////////////////
+
+//////////////////////////////////////////////////////
+// Functions to use te mfrc522 reader  
+//////////////////////////////////////////////////////
+uint8_t get_mfrc522_version(Mfrc522 *dev);
 
 //////////////////////////////////////////////////////
 //  Functions to test/validate the MFRC522 module
@@ -52,9 +60,17 @@ bool validate_mfrc522_version(Mfrc522 *dev);    // Function to print the MFRC522
 //////////////////////////////////////////////////////
 int socket_init(void);
 int socket_connect_master(Socket *sock, const char *master_host, const char *master_port);
+int socket_send_critial_error(Socket *sock); // Send critical error message to master
 int socket_cleanup(Socket *socketFd);
 
 //=======================================================================================================================================================================//
+/**
+ * Main logic for the mfrc522_module
+ *  - Socket Workflow
+ *      - Signal OK to master(init done)
+ *      - Send mfrc522 version to master
+ *      - Start checking for proximity cards. Send the UID if detected (String-HEX format).
+ */
 int main(int argc, char *argv[])
 {
     // Check if the user provided the correct number of arguments
@@ -75,7 +91,7 @@ int main(int argc, char *argv[])
     FILE *logFile = fopen("mfrc_module_logs.txt", "w");
     if (logFile == NULL)
     {
-        fprintf(logFile, "[-] Failed to open log file\n");
+        fprintf(logFile, "[-] **Failed to open log file\n");
         fflush(logFile);
         exit(ERROR_INIT);
     }
@@ -137,7 +153,7 @@ int main(int argc, char *argv[])
     fflush(logFile);
 
     // Send the OK message to the master
-    char *ok_message = "OK"; // This means where starting to check for cards
+    char *ok_message = "OK Xd"; // This means where starting to check for cards
     if (send(sock->socketFD, ok_message, strlen(ok_message), 0) < 0)
     {
         fprintf(logFile, "[-] Failed to send OK message to master\n");
@@ -145,10 +161,25 @@ int main(int argc, char *argv[])
         exit(ERROR_SOCKET_CONNECTION);
     }
 
+    // Get reader version
+    uint8_t version = get_mfrc522_version(dev);
+    if (version != 0x00 && version != 0xFF) {
+        char data[64];
+        snprintf(data, sizeof(data), "%d", version);
+        if (send(sock->socketFD, data, strlen(data), 0) < 0) {
+            fprintf(logFile, "[-] Failed to send reader version\n");
+            fflush(logFile);
+            
+            // Send critical_error message to master TODO
+            // if (socket_send_critial_error(sock))
+            exit(ERROR_PICC_UID);
+        }
+    }
+
     // Check if new card is present
     while (true)
     {
-        sleep(1); // Sleep for 1 second
+        sleep(0.1);
         if (mfrc522_isNewCardPresent(dev))
         {
             Uid uid = {// Structure to hold the UID
@@ -193,6 +224,12 @@ int main(int argc, char *argv[])
         }
     }
 
+
+    free_resources(dev, sock, logFile);
+    exit(EXIT_SUCCESS);
+}
+
+void free_resources(Mfrc522 *dev, Socket *sock, FILE *logFile) {
     // Close the log file
     fclose(logFile);
     // Clean up
@@ -201,8 +238,6 @@ int main(int argc, char *argv[])
     socket_cleanup(sock);
 
     free(dev);
-    free(sock);
-    exit(EXIT_SUCCESS);
 }
 
 int socket_init(void)
@@ -241,6 +276,14 @@ int socket_connect_master(Socket *sock, const char *master_host, const char *mas
     return EXIT_SUCCESS;
 }
 
+int socket_send_critial_error(Socket *sock) {
+    char message[256] = "CRITICAL_ERROR";
+    if (send(sock->socketFD, message, sizeof(message), strlen(message)) < 0) {
+        return ERROR_SOCKET_CONNECTION;
+    }
+    return EXIT_SUCCESS;
+}
+
 int socket_cleanup(Socket *sock)
 {
     close(sock->socketFD);
@@ -251,7 +294,6 @@ int socket_cleanup(Socket *sock)
 bool validate_mfrc522_operations(Mfrc522 *dev)
 {
     // Check if the register operations work as expected
-    printf("[*] Testing register operations...\n");
     uint8_t test_value = 0xAD;
     mfrc522_write_register(dev, FIFODataReg, test_value);
     uint8_t read_value = mfrc522_read_register(dev, FIFODataReg);
@@ -273,21 +315,18 @@ bool validate_mfrc522_operations(Mfrc522 *dev)
     {
         read_data[i] = mfrc522_read_register(dev, FIFODataReg);
     }
-    // Print the read data
-    printf("[+] Read data from FIFO:\n");
+    // Check read data is the same as the data we wrote
     if (memcmp(data, read_data, 16) != 0)
     {
         perror("    [*] Multiple read/write operation failed\n");
         return false;
     }
-    printf("    [+] Mfrc522 operations: OK\n");
     return true;
 }
 
 bool validate_mfrc522_version(Mfrc522 *dev)
 {
     // Read version register
-    printf("[*] Reading version register...\n");
     uint8_t version = mfrc522_read_register(dev, VersionReg);
 
     if (version == 0x00 || version == 0xFF)
@@ -298,4 +337,8 @@ bool validate_mfrc522_version(Mfrc522 *dev)
     else if (version != 0xB2)
         printf("    [+] MFRC522 version: %02X\n", version);
     return true;
+}
+
+uint8_t get_mfrc522_version(Mfrc522 *dev) {
+    return mfrc522_read_register(dev, VersionReg);
 }
