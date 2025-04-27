@@ -6,217 +6,207 @@ import sys
 import subprocess
 import base64
 import json
-#import requests
+import requests
 
-# Define error codes
-# Error code constants
-ERROR_NO_ERROR = 0
-ERROR_INVALID_COMMAND = 1
-ERROR_ACCESS_DENIED = 2
-ERROR_DEVICE_NOT_FOUND = 3
-ERROR_TIMEOUT = 4
-ERROR_UNKNOWN = 5
-MFRC522_PROCESS_ERROR = 6
-SOCKET_ERROR = 7
-
-class ControlAccessSystem:
-    def __init__(self, host='127.0.0.1', port=20077):
-        """Initialize the Control Access System."""
-        # Print project logo
-        self.print_logo()
-        print("Version 0.1\n")
-
-        # Socket variables
-        self.host = host
-        self.port = port
-        self.server_socket = None
-
-        # Module process variables
+class MFRC522Module:
+    def __init__(self, port=20077, address='127.0.0.1'):
+        """Initialize the MFRC522 module."""
         self.module = None
         self.module_pid = None
         self.module_log_fd = None
+        self.socket = None
+        self.socket_address = address
+        self.socket_port = port
+        self.module_bin_path = "./mfrc522_module"
         self.module_log_path = "./mfrc522_module.log"
-    
-    def control_access(self):
-        """Control access based on the command received."""
-        # Start the MFRC522 process
-        try:
-            self.module_pid = self.start_mfrc522_process()
-        except Exception as e:
-            print(f"[-] Error starting MFRC522 process: {e}")   # Handle error
-            exit(MFRC522_PROCESS_ERROR)
 
+        self.command_dict = {
+            "GET_UID": 0,
+            "GET_READER_VERSION": 1
+        }
 
-        # Connect to the mfrc522 process socket
-        self.module_connection, self.module_add = self.server_socket.accept()
-        print(f"[+] Connection from {self.module_add}")
+        self.status_dict = {
+            "OK": 0,
+            "ERROR": 1,
+            "TIMEOUT": 2,
+            "NO_CARD": 3,
+        }
 
-        # Recieve the OK signal
-        try:
-            data = self.module_connection.recv(1024).decode("utf-8")
-            if "OK" in data:
-                print(f"[+] MFRC522 reader is active {data}")
-            else:
-                print(f"[-] Unexpected data received: {data}")
-                exit(ERROR_UNKNOWN)
-        except socket.error as e:
-            print(f"[-] Socket error while recieving for OK: {e}")
-            exit(SOCKET_ERROR)
-
-        # Recieve the reader version
-        try:
-            version= self.module_connection.recv(1024).decode("utf-8")
-            if version:
-                print(f"[+] reader version: {version}")
-        except socket.error as e:
-            print(f"[-] Socket error while : {e}")
-            exit(SOCKET_ERROR)
-        # Main loop (Check for cards UID and face recognition)
-        while True:
-            uid_base64 = self.wait_till_card_uid()
-            # TODO - Integrate logic to verify Face ID
-
-        # Close the server
-        self.stop_server()
-
-        # Stop mfrc522_modue
-        self.stop_mfrc522_process()
-        
-        
-
-    def print_logo(self):
-        """Print the project logo."""
-        print(
-            r"""
-            .--------------------------------------------.
-            | ______         ________         ______     |
-            |/_____/\       /_______/\       /_____/\    |
-            |\:::__\/       \::: _  \ \      \::::_\/_   |
-            | \:\ \  __   ___\::(_)  \ \   ___\:\/___/\  |
-            |  \:\ \/_/\ /__/\\:: __  \ \ /__/\\_::._\:\ |
-            |   \:\_\ \ \\::\ \\:.\ \  \ \\::\ \ /____\:\|
-            |    \_____\/ \:_\/ \__\/\__\/ \:_\/ \_____\/|
-            '--------------------------------------------'
-            """)
-        print("Control Access System")
-
-    def start_server(self):
-        """Start the server to listen for incoming connections."""
-        try:
-            self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM) # Create a TCP/IPv4 socket
-            self.server_socket.bind((self.host, self.port)) # Bind to the host and port
-            self.server_socket.listen(5)
-        except socket.error as e:
-            print(f"[-] Error starting server: {e}")
-            exit(SOCKET_ERROR)
-        print(f"[+] Server started on {self.host}:{self.port}")
-
-    def stop_server(self):
-        """Stop the server."""
-        # Flush the log file
-        if self.module_log_fd:
-            self.module_log_fd.flush()
-            self.module_log_fd.close()
-            print("[*] Log file flushed and closed")
-        
-        if self.module_connection:
-            self.module_connection.close()
-            print("[*] Module connection closed")
-
-        if self.server_socket:
-            self.server_socket.close()
-            print("[*] Server stopped")
-
-        # Kill the MFRC522 process
-        if hasattr(self, 'module_pid'):
-            self.stop_mfrc522_process(self.module_pid)
-            print("[*] MFRC522 process stopped")
-        else:
-            print("No MFRC522 process to stop")
-        print("[*] See ya choom!\n")
-        exit(0)
-
-    # //////////////////////////// HANDLE MFRC522 PROCESS ///////////////////////
-    def start_mfrc522_process(self):
+    def mfrc522_start_process(self):
         """Start the MFRC522 process."""
-        
-        self.module =  subprocess.Popen(
-            ["./mfrc522_module", str(self.port)],
-            stdout= subprocess.PIPE,
-            stderr= subprocess.PIPE
+        # Start the MFRC522 process
+        self.module = subprocess.Popen(
+            ["./mfrc522_module", str(self.socket_port)]
+            # stdout=subprocess.PIPE,
+            # stderr=subprocess.PIPE,
         )
         print("[*] MFRC522 process started")
         time.sleep(1)
 
-        # Get the PID of the MFRC522 process
-        pid = subprocess.check_output(["pgrep", "-f", "mfrc522_module"]).strip()
-
-        # Check if there are more than one process and kill them
-        if len(pid.split()) > 1:
-            print("[*] More than one MFRC522 process found, killing all...")
-            for p in pid.split():
-                os.kill(int(p), 9)
-            exit(MFRC522_PROCESS_ERROR)
-        print(f"[*] MFRC522 process PID: {pid.decode('utf-8')}")
-        return pid.decode('utf-8')
-
-    def stop_mfrc522_process(self, pid: str):
+    def mfrc522_stop_process(self):
         """Stop the MFRC522 process."""
-        print(f"[*] Stopping MFRC522 process with PID: {pid}")
-        try:
-            os.kill(int(pid), 9)  # Send SIGKILL signal
-        except OSError as e:
-            print(f"Error stopping MFRC522 process: {e}")
-            return MFRC522_PROCESS_ERROR
-        finally:
+        if self.module:
+            self.module.terminate()
+            self.module.wait()
             print("[*] MFRC522 process stopped")
+        else:
+            print("No MFRC522 process to stop")
+    
+    def mfrc522_get_process_pid(self):
+        """Get the PID of the MFRC522 process."""
+        try:
+            pid = subprocess.check_output(["pgrep", "-f", "mfrc522_module"]).strip()
+            return pid.decode('utf-8')
+        except subprocess.CalledProcessError as e:
+            print(f"Error getting MFRC522 process PID: {e}")
+            return None
 
-    # /////////////////////////// Card UID Utils ////////////////////////////
-    def wait_till_card_uid(self) -> str:
-        """Wait to recieve a UID through sockets and return it in base64"""
-        data_serialized = self.module_connection.recv(1024).decode('utf-8')
-        if data_serialized:
-            """ The mfrc522 sends a JSON with the UID as a HEX String and the lenght"""
-            # Parse response
-            data_deserialized = json.loads(data_serialized)
-            print(f"[*] Received data: {data_deserialized}")
-            
-            # Get uid in bytes
-            uid_hex = data_deserialized.get("uid")
-            uid_bytes = self.uid_hex_to_bytes(uid_hex)
+    def mfrc522_create_socket(self):
+        """Create a socket for the MFRC522 process."""
+        try:
+            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.socket.bind((self.socket_address, self.socket_port))
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.socket.listen(5)
+            print(f"[*] Master Socket created and listening on {self.socket_address}:{self.socket_port}")
+        except socket.error as e:
+            print(f"[-] Error creating socket: {e}")
+            return None
+        return self.socket 
 
-            # Encode the UID to base64
-            uid_base64 = self.uid_bytes_to_base64(uid_bytes)
-            print(f"[*] UID in base64: {uid_base64}")
-            return uid_base64
-        return None
+    def mfrc522_accept_connection(self):
+        """Accept a connection from the MFRC522 process."""
+        try:
+            self.socket_connection, self.socket_address = self.socket.accept()
 
-    def uid_hex_to_bytes(self, uid_hex: str) -> bytes:
-        # Decode the UID from hex to bytes
-        return bytes.fromhex(uid_hex)
+            # self.socket.settimeout(5)  # Set a timeout for the connection
+            status = self.mfrc522_receive_data()
+            if 'OK' in status:
+                print(f"[+] MFRC522 reader is active {status}")
+            print(f"[+] Connection from {self.socket_address}")
+        except socket.error as e:
+            print(f"[-] Error accepting connection: {e}")
+            return None
+        return self.socket
+    
+    def mfrc522_receive_data(self):
+        """Receive data from the MFRC522 process."""
+        try:
+            data = self.socket_connection.recv(1024).decode("utf-8")
+            if data:
+                print(f"[+] Received data: {data}")
+                return data
+            else:
+                return None
+        except socket.error as e:
+            print(f"[-] Socket error while receiving data: {e}")
+            return None
+    
+    def mfrc522_send_data(self, data):
+        """Send data to the MFRC522 process."""
+        try:
+            self.socket_connection.sendall(data.encode("utf-8"))
+            print(f"[+] Sent data: {data}")
+        except socket.error as e:
+            print(f"[-] Socket error while sending data: {e}")
+            return None
+        return True
 
-    def uid_bytes_to_base64(self, uid_bytes: bytes) -> str:
-        return base64.b64encode(uid_bytes).decode('utf-8')
+    def mfrc522_close_connection(self):
+        """Close the socket connection."""
+        if self.socket_connection:
+            self.socket_connection.close()
+            print("[*] Socket slave connection closed")
+        else:
+            print("No socket connection to close")
 
+    def mfrc522_close_socket(self):
+        """Close the socket connection."""
+        if self.socket:
+            self.socket.close()
+            self.socket.close()
+            print("[*] Socket connection closed")
+        else:
+            print("No socket connection to close")
+    
+    def mfrc522_send_command(self, command):
+        """Send a command to the MFRC522 process."""
+        try:
+            self.socket_connection.sendall(command.encode("utf-8"))
+            print(f"[+] Sent command: {command}")
+            if "OK" in self.mfrc522_receive_data():
+                print(f"[+] Command sent successfully: {command}")
+            else:
+                print(f"[-] Command failed: {command}")
+                return None
+            print(f"[+] Sent command: {command}")
+        except socket.error as e:
+            print(f"[-] Socket error while sending command: {e}")
+            return None
+        return True
 
+    def mfrc522_get_reader_version(self):
+        """Get the reader version."""
+        print("[*] Getting reader version...")
+        self.mfrc522_send_command(str(self.command_dict["GET_READER_VERSION"]))
+        version = self.mfrc522_receive_data()
+        if version:
+            print(f"[+] Reader version: {version}")
+            return version
+        else:
+            print("[-] Error getting reader version")
+            return None
 
+    def mfrc522_get_uid(self):
+        """Get the UID of the card."""
+        print("[*] Getting UID...")
+        self.mfrc522_send_command(str(self.command_dict["GET_UID"]))
+        uid = self.mfrc522_receive_data()
+        if uid :
+            return uid
+        else:
+            return None
 
+    def mfrc522_close(self):
+        """Close the MFRC522 module."""
+        self.mfrc522_stop_process()
+        self.mfrc522_close_connection()
+        self.mfrc522_close_socket()
+        print("[*] MFRC522 module closed")
+        exit(0)
 
 def main():
-    # Create an instance of the ControlAccessSystem
-    control_access_system = ControlAccessSystem()
-
-    # Start the server
-    control_access_system.start_server()
-
     try:
-        control_access_system.control_access()
+        mf_module = MFRC522Module()
+        mf_module.mfrc522_create_socket()
+        mf_module.mfrc522_start_process()
+        time.sleep(1)
+        pid = mf_module.mfrc522_get_process_pid()
+        print(f"[+] MFRC522 process PID: {pid}")
+        mf_module.mfrc522_accept_connection()
+        print("-----------------------------------")
+        mf_module.mfrc522_get_reader_version()
+        while True:
+            print("-----------------------------------")
+            uid = mf_module.mfrc522_get_uid()
+            if uid:
+                print(f"[+] UID: {uid}")
+            else:
+                print("[-] Error getting UID")
+            time.sleep(1)
     except KeyboardInterrupt:
-        print("Keyboard interrupt received, stopping server...")
-        control_access_system.stop_server()
+        print("\n[*] Exiting...")
+        mf_module.mfrc522_close()
+        exit(0)
     except Exception as e:
-        print(f"An error occurred: {e}")
-        control_access_system.stop_server()
+        print(f"[-] Error: {e}")
+        mf_module.mfrc522_close()
+        exit(1)
+    finally:
+        mf_module.mfrc522_close()
+        print("[*] MFRC522 module closed")
+        exit(0)
+    
 
 if __name__ == "__main__":
     main()

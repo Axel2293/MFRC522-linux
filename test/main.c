@@ -47,7 +47,9 @@ void free_resources(Mfrc522 *dev, Socket *sock, FILE *logFile);     // Free up r
 //////////////////////////////////////////////////////
 // Functions to use te mfrc522 reader  
 //////////////////////////////////////////////////////
-uint8_t get_mfrc522_version(Mfrc522 *dev);
+bool validate_mfrc522_operations(Mfrc522 *dev); // Function to validate read/write operations
+uint8_t mfrc522_get_version(Mfrc522 *dev);   // Function to get the MFRC522 version
+uint8_t mfrc522_wait_for_card(Mfrc522 *dev, Socket *sock, Uid *uid); // Function to wait for a card to be present
 
 //////////////////////////////////////////////////////
 //  Functions to test/validate the MFRC522 module
@@ -60,8 +62,15 @@ bool validate_mfrc522_version(Mfrc522 *dev);    // Function to print the MFRC522
 //////////////////////////////////////////////////////
 int socket_init(void);
 int socket_connect_master(Socket *sock, const char *master_host, const char *master_port);
-int socket_send_critial_error(Socket *sock); // Send critical error message to master
+int socket_receive(Socket *sock, char *buffer, size_t buffer_size); // Receive data from the master
+int socket_send_ok(Socket *sock);   // Send OK message to master
+int socket_send_error(Socket *sock); // Send critical error message to master
+int socket_send_reader_version(Socket *sock, uint8_t version); // Send MFRC522 version to master
 int socket_cleanup(Socket *socketFd);
+
+//  Global variables
+FILE *logFile = NULL; // Global log file pointer
+const char *logFilePath = "./mfrc522.log"; // Path to the log file
 
 //=======================================================================================================================================================================//
 /**
@@ -73,10 +82,18 @@ int socket_cleanup(Socket *socketFd);
  */
 int main(int argc, char *argv[])
 {
+    // Open log file or create it if it doesn't exist
+    logFile = fopen(logFilePath, "w+");
+    if (logFile == NULL)
+    {
+        printf("[-] Failed to open log file: %s\n", logFilePath);
+        exit(ERROR_INIT);
+    }
+
     // Check if the user provided the correct number of arguments
     if (argc != 2)
     {
-        fprintf(stderr, "Usage: %s <master_port>\n", argv[0]);
+        fprintf(logFile, "Usage: %s <master_port>\n", argv[0]);
         exit(ERROR_TO_FEW_OR_MANY_ARGS);
     }
 
@@ -87,21 +104,13 @@ int main(int argc, char *argv[])
     Mfrc522 *dev = calloc(1, sizeof(Mfrc522));
     Socket *sock = calloc(1, sizeof(Socket));
 
-    // Open log file and override the default log file
-    FILE *logFile = fopen("mfrc_module_logs.txt", "w");
-    if (logFile == NULL)
-    {
-        fprintf(logFile, "[-] **Failed to open log file\n");
-        fflush(logFile);
-        exit(ERROR_INIT);
-    }
     fprintf(logFile, "==============================\n");
     fprintf(logFile, "==== MFRC522 MODULE C.A.S ====\n");
     fprintf(logFile, "==============================\n\n");
     fflush(logFile);
 
     // Show PID
-    fprintf(logFile, "[*] PID: %d\n", pid);
+    fprintf(logFile, "[*] Slave PID: %d\n", pid);
     fflush(logFile);
 
     // Initialize the MFRC522 device
@@ -152,78 +161,87 @@ int main(int argc, char *argv[])
     fprintf(logFile, "[+] Connected to master process\n");
     fflush(logFile);
 
-    // Send the OK message to the master
-    char *ok_message = "OK Xd"; // This means where starting to check for cards
-    if (send(sock->socketFD, ok_message, strlen(ok_message), 0) < 0)
+    // Send the ok message to the master
+    if (socket_send_ok(sock) != 0)
     {
         fprintf(logFile, "[-] Failed to send OK message to master\n");
         fflush(logFile);
         exit(ERROR_SOCKET_CONNECTION);
     }
+    fprintf(logFile, "[+] Sent OK message to master\n");
+    fflush(logFile);
 
-    // Get reader version
-    uint8_t version = get_mfrc522_version(dev);
-    if (version != 0x00 && version != 0xFF) {
-        char data[64];
-        snprintf(data, sizeof(data), "%d", version);
-        if (send(sock->socketFD, data, strlen(data), 0) < 0) {
-            fprintf(logFile, "[-] Failed to send reader version\n");
-            fflush(logFile);
-            
-            // Send critical_error message to master TODO
-            // if (socket_send_critial_error(sock))
-            exit(ERROR_PICC_UID);
-        }
-    }
-
-    // Check if new card is present
-    while (true)
+    ///////////////////////////////////////////////////////////////////////////////////
+    // Listen for incoming commands from the master
+    ///////////////////////////////////////////////////////////////////////////////////
+    char buffer[256];
+    while (1)
     {
-        sleep(0.1);
-        if (mfrc522_isNewCardPresent(dev))
+        // Receive command from master
+        if (socket_receive(sock, buffer, sizeof(buffer)) != 0)
         {
-            Uid uid = {// Structure to hold the UID
-                       .uidByte = {0},
-                       .size = 0,
-                       .sak = 0};
-            fprintf(logFile, "[+] Card detected\n");
+            fprintf(logFile, "[-] Failed to receive command from master\n");
             fflush(logFile);
+            exit(ERROR_SOCKET_CONNECTION);
+        }
+        fprintf(logFile, "[+] Received command from master: %s\n", buffer);
+        fflush(logFile);
 
-            if (PICC_ReadCardSerial(dev, &uid))
+        // Send ok message to master
+        if (socket_send_ok(sock) != 0)
+        {
+            fprintf(logFile, "[-] Failed to send OK message to master\n");
+            fflush(logFile);
+            exit(ERROR_SOCKET_CONNECTION);
+        }
+
+        if (strcmp(buffer, "0") == 0)
+        {
+            // Search for a card
+            fprintf(logFile, "[+] Searching for a card...\n");
+            fflush(logFile);
+            // Wait for a card to be present
+            Uid *uid = calloc(1, sizeof(Uid));
+            uint8_t status = mfrc522_wait_for_card(dev, sock, uid);
+            if (status != 0)
             {
-                char message[256];
-                snprintf(message, sizeof(message), "{\"uid\": \"");
-                for (int i = 0; i < uid.size; i++)
-                {
-                    snprintf(message + strlen(message), sizeof(message) - strlen(message), "%02X", uid.uidByte[i]);
-                }
-                snprintf(message + strlen(message), sizeof(message) - strlen(message), "\", \"length\": %d}", uid.size);
-                // Send the message to the master
-                if (send(sock->socketFD, message, strlen(message), 0) < 0)
-                {
-                    fprintf(logFile, "[-] Failed to send UID message to master\n");
-                    fflush(logFile);
-                    exit(ERROR_SOCKET_CONNECTION);
-                }
-                fprintf(logFile, "[+] Card UID: %s\n", message);
+                fprintf(logFile, "[-] Failed to read card UID\n");
                 fflush(logFile);
+                break;
             }
-            else
+
+        }
+        else if (strcmp(buffer, "1") == 0)
+        {
+            // Get the MFRC522 version
+            uint8_t version = mfrc522_get_version(dev);
+            if (version == 0x00 || version == 0xFF)
             {
-                fprintf(logFile, "[-] Failed to read card serial\n");
+                fprintf(logFile, "[-] Failed to read MFRC522 version\n");
                 fflush(logFile);
-                // Send error message to master
-                char *error_message = "Error reading card UID";
-                if (send(sock->socketFD, error_message, strlen(error_message), 0) < 0)
-                {
-                    fprintf(logFile, "[-] Failed to send error message to master\n");
-                    fflush(logFile);
-                    exit(ERROR_SOCKET_CONNECTION);
-                }
+                return ERROR_MFRC522_READ;
             }
+            // Convert version to hex string
+            char hex_version[5];
+            snprintf(hex_version, sizeof(hex_version), "%02X", version);
+
+            // Send the version to the master
+            if (send(sock->socketFD, hex_version, sizeof(hex_version), strlen(hex_version)) < 0)
+            {
+                fprintf(logFile, "[-] Failed to send MFRC522 version to master\n");
+                fflush(logFile);
+                exit(ERROR_SOCKET_CONNECTION);
+            }
+            fprintf(logFile, "[+] MFRC522 version sent to master: %s\n", hex_version);
+            fflush(logFile);
+        }
+        else
+        {
+            fprintf(logFile, "[-] Unknown command from master: %s\n", buffer);
+            fflush(logFile);
+            continue;
         }
     }
-
 
     free_resources(dev, sock, logFile);
     exit(EXIT_SUCCESS);
@@ -240,13 +258,17 @@ void free_resources(Mfrc522 *dev, Socket *sock, FILE *logFile) {
     free(dev);
 }
 
+////////////////////////////////////////////////////////////////
 int socket_init(void)
 {
     int sockFd = 0;
-    if ((sockFd = socket(AF_INET, SOCK_STREAM, 0)) == -1)
+    if ((sockFd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
     {
+        fprintf(logFile, "[-] Socket creation failed\n");
+        fflush(logFile);
         return ERROR_SOCKET_INIT;
     }
+
     return sockFd;
 }
 
@@ -259,28 +281,56 @@ int socket_connect_master(Socket *sock, const char *master_host, const char *mas
 
     if (server_addr.sin_port == 0)
     {
+        fprintf(logFile, "[-] Invalid port number: %s\n", master_port);
+        fflush(logFile);
         return ERROR_SOCKET_CONNECTION;
     }
 
     // Convert IPv4 addresses from text to binary form
     if (inet_pton(AF_INET, master_host, &server_addr.sin_addr) <= 0)
     {
+        fprintf(logFile, "[-] Invalid address: %s\n", master_host);
+        fflush(logFile);
         return ERROR_SOCKET_CONNECTION;
     }
 
     // Connect to the server
-    if (connect(sock->socketFD, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
+    int result;
+    if ((result = connect(sock->socketFD, (struct sockaddr *)&server_addr, sizeof(server_addr))) < 0)
     {
+        fprintf(logFile, "[-] Connection failed to master: %s:%s:%d\n", master_host, master_port, result);
+        fflush(logFile);
+        return ERROR_SOCKET_CONNECTION;
+    }
+
+    // Send the OK message to the master
+    socket_send_ok(sock);
+
+    return EXIT_SUCCESS;
+}
+
+int socket_send_ok(Socket *sock) {
+    char message[256] = "OK";
+    if (send(sock->socketFD, message, sizeof(message), strlen(message)) < 0) {
         return ERROR_SOCKET_CONNECTION;
     }
     return EXIT_SUCCESS;
 }
 
-int socket_send_critial_error(Socket *sock) {
-    char message[256] = "CRITICAL_ERROR";
+int socket_send_error(Socket *sock) {
+    char message[256] = "ERROR";
     if (send(sock->socketFD, message, sizeof(message), strlen(message)) < 0) {
         return ERROR_SOCKET_CONNECTION;
     }
+    return EXIT_SUCCESS;
+}
+
+int socket_receive(Socket *sock, char *buffer, size_t buffer_size) {
+    ssize_t bytes_received = recv(sock->socketFD, buffer, buffer_size - 1, 0);
+    if (bytes_received < 0) {
+        return ERROR_SOCKET_CONNECTION;
+    }
+    buffer[bytes_received] = '\0'; // Null-terminate the received string
     return EXIT_SUCCESS;
 }
 
@@ -291,6 +341,23 @@ int socket_cleanup(Socket *sock)
     return EXIT_SUCCESS;
 }
 
+int socket_send_reader_version(Socket *sock, uint8_t version) {
+    if (version == 0x00 || version == 0xFF) {
+        return ERROR_MFRC522_READ;
+    }
+    // Convert version to hex string
+    char hex_version[5];
+    snprintf(hex_version, sizeof(hex_version), "%02X", version);
+
+    // Send the version to the master
+    if (send(sock->socketFD, hex_version, sizeof(hex_version), strlen(hex_version)) < 0) {
+        return ERROR_SOCKET_CONNECTION;
+    }
+    fprintf(logFile, "[+] MFRC522 version sent to master: %s\n", hex_version);
+    return EXIT_SUCCESS;
+}
+
+/////////////////////////////////////////////////////////////////
 bool validate_mfrc522_operations(Mfrc522 *dev)
 {
     // Check if the register operations work as expected
@@ -339,6 +406,37 @@ bool validate_mfrc522_version(Mfrc522 *dev)
     return true;
 }
 
-uint8_t get_mfrc522_version(Mfrc522 *dev) {
+uint8_t mfrc522_get_version(Mfrc522 *dev) {
     return mfrc522_read_register(dev, VersionReg);
+}
+
+uint8_t mfrc522_wait_for_card(Mfrc522 *dev, Socket *sock, Uid *uid)
+{
+    // Wait for a card to be present
+    while (1)
+    {
+        if (mfrc522_isNewCardPresent(dev))
+        {
+            fprintf(logFile, "[+] Card detected\n");
+            fflush(logFile);
+            if (PICC_ReadCardSerial(dev, uid))
+            {
+                // Convert UID to hex string Eg. "234A5B6C"
+                char uid_hex[256] = {0};
+                snprintf(uid_hex, sizeof(uid_hex), "%02X%02X%02X%02X", uid->uidByte[0], uid->uidByte[1], uid->uidByte[2], uid->uidByte[3]);
+
+                // Send the UID to the master
+                if (send(sock->socketFD, uid_hex, sizeof(uid_hex), strlen(uid_hex)) < 0)
+                {
+                    fprintf(logFile, "[-] Failed to send UID message to master\n");
+                    fflush(logFile);
+                    return ERROR_SOCKET_CONNECTION;
+                }
+                fprintf(logFile, "[+] Card UID: %s\n", uid_hex);
+                fflush(logFile);
+                return EXIT_SUCCESS;
+            }
+        }
+        
+    }
 }

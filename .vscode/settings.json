@@ -4,7 +4,8 @@
         "temp": "cpp",
         "ioctl.h": "c",
         "ioctls.h": "c",
-        "cstddef": "c"
+        "cstddef": "c",
+        "system_error": "c"
     },
     "makefile.configureOnOpen": false
 }
