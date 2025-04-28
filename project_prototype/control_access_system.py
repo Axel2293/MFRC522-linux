@@ -1,12 +1,25 @@
 import socket
-import argparse
 import time
 import os
 import sys
 import subprocess
 import base64
-import json
 import requests
+import cv2
+from dotenv import load_dotenv
+
+class FaceRecognition:
+    def capture_frame(path="./captured_frame.jpg"):
+        """Capture a frame from the webcam"""
+        cap = cv2.VideoCapture(0)
+        ret, frame = cap.read()
+        cap.release()
+        if ret:
+            # Save the frame to a file
+            cv2.imwrite(path, frame)
+            return path
+        else:
+            raise Exception("Failed to capture frame from cam.")
 
 class MFRC522Module:
     def __init__(self, port=20077, address='127.0.0.1'):
@@ -78,8 +91,6 @@ class MFRC522Module:
         """Accept a connection from the MFRC522 process."""
         try:
             self.socket_connection, self.socket_address = self.socket.accept()
-
-            # self.socket.settimeout(5)  # Set a timeout for the connection
             status = self.mfrc522_receive_data()
             if 'OK' in status:
                 print(f"[+] MFRC522 reader is active {status}")
@@ -176,6 +187,8 @@ class MFRC522Module:
         exit(0)
 
 def main():
+    load_dotenv()
+
     try:
         mf_module = MFRC522Module()
         mf_module.mfrc522_create_socket()
@@ -186,14 +199,59 @@ def main():
         mf_module.mfrc522_accept_connection()
         print("-----------------------------------")
         mf_module.mfrc522_get_reader_version()
+
+        # Main loop to read UID and verify face ID
         while True:
             print("-----------------------------------")
             uid = mf_module.mfrc522_get_uid()
-            if uid:
-                print(f"[+] UID: {uid}")
-            else:
-                print("[-] Error getting UID")
+            uid = uid[0:8]      # Truncate UID to 8 characters
+            print(f"[+] Card UID: {uid}")
+            # Convert UID to bytes
+            uid_bytes = bytes.fromhex(str(uid))
+            print(f"[+] Card UID (bytes): {uid_bytes}")
+            # Conver UID to base64
+            uid_base64 = base64.b64encode(uid_bytes).decode('utf-8')
+            print(f"[+] Card UID (base64): {uid_base64}")
             time.sleep(1)
+
+            # Send UID to server with API key as a header
+            server_url = os.getenv("API_URL")
+            if not server_url:
+                print("[-] API_URL not set in .env file")
+                exit(1)
+
+            print(f"[*] Sending UID to server: {server_url}")
+            response = requests.post(
+                server_url + "/api/card/validate",
+                headers={"x-api-key": os.getenv("API_KEY")},
+                json={"Card_ID": uid_base64}
+            )
+
+            if response.status_code != 200:
+                print(f"[-] Error sending UID to server: {response.status_code}")
+                print(f"[-] Response: {response.text}")
+            
+            print(f"[+] Server response: {response.json()}")
+            user_id = response.json().get("user")
+
+            # Capture frame from camera
+            frame_path = FaceRecognition.capture_frame()
+            print(f"[+] Frame captured: {frame_path}")
+
+            # Send frame to server for face recognition
+            with open(frame_path, "rb") as image_file:
+                file = {
+                    "UserPhoto": (frame_path, image_file, "image/jpg")
+                }
+                response = requests.post(
+                    server_url + "/api/face/validate",
+                    headers={"x-api-key": os.getenv("API_KEY")},
+                    files=file,
+                    data={"User": user_id}
+                )
+                if response.status_code != 200:
+                    print(f"[-] Error sending frame to server: {response.status_code}")
+                print(f"[-] Response: {response.text}")
     except KeyboardInterrupt:
         print("\n[*] Exiting...")
         mf_module.mfrc522_close()
