@@ -186,10 +186,27 @@ class MFRC522Module:
         print("[*] MFRC522 module closed")
         exit(0)
 
+def print_logo():
+        """Print the project logo."""
+        print(
+            r"""
+            .--------------------------------------------.
+            | ______         ________         ______     |
+            |/_____/\       /_______/\       /_____/\    |
+            |\:::__\/       \::: _  \ \      \::::_\/_   |
+            | \:\ \  __   ___\::(_)  \ \   ___\:\/___/\  |
+            |  \:\ \/_/\ /__/\\:: __  \ \ /__/\\_::._\:\ |
+            |   \:\_\ \ \\::\ \\:.\ \  \ \\::\ \ /____\:\|
+            |    \_____\/ \:_\/ \__\/\__\/ \:_\/ \_____\/|
+            '--------------------------------------------'
+            """)
+        print("Control Access System")
+
 def main():
     load_dotenv()
 
     try:
+        print_logo()
         mf_module = MFRC522Module()
         mf_module.mfrc522_create_socket()
         mf_module.mfrc522_start_process()
@@ -198,17 +215,17 @@ def main():
         print(f"[+] MFRC522 process PID: {pid}")
         mf_module.mfrc522_accept_connection()
         print("-----------------------------------")
-        mf_module.mfrc522_get_reader_version()
+        ##mf_module.mfrc522_get_reader_version()
 
         # Main loop to read UID and verify face ID
         while True:
             print("-----------------------------------")
             uid = mf_module.mfrc522_get_uid()
             uid = uid[0:8]      # Truncate UID to 8 characters
-            print(f"[+] Card UID: {uid}")
+            #print(f"[+] Card UID: {uid}")
             # Convert UID to bytes
             uid_bytes = bytes.fromhex(str(uid))
-            print(f"[+] Card UID (bytes): {uid_bytes}")
+            #print(f"[+] Card UID (bytes): {uid_bytes}")
             # Conver UID to base64
             uid_base64 = base64.b64encode(uid_bytes).decode('utf-8')
             print(f"[+] Card UID (base64): {uid_base64}")
@@ -230,6 +247,8 @@ def main():
             if response.status_code != 200:
                 print(f"[-] Error sending UID to server: {response.status_code}")
                 print(f"[-] Response: {response.text}")
+                # TODO: Send slave comand to turn the red LED on
+                continue
             
             print(f"[+] Server response: {response.json()}")
             user_id = response.json().get("user")
@@ -249,9 +268,19 @@ def main():
                     files=file,
                     data={"User": user_id}
                 )
+
                 if response.status_code != 200:
                     print(f"[-] Error sending frame to server: {response.status_code}")
-                print(f"[-] Response: {response.text}")
+                    continue
+
+                if not response.text:
+                    print("[-] No response from server")
+                    continue
+                else:
+                    print(f"[+] Server response: {response.json()}")
+
+                if response.json().get("message") == "Access Granted":
+                    print("[+] Access granted!!")
     except KeyboardInterrupt:
         print("\n[*] Exiting...")
         mf_module.mfrc522_close()
@@ -264,7 +293,6 @@ def main():
         mf_module.mfrc522_close()
         print("[*] MFRC522 module closed")
         exit(0)
-    
 
 if __name__ == "__main__":
     main()
