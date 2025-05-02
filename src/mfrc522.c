@@ -725,6 +725,6 @@ uint8_t PICC_Select(Mfrc522 *dev, Uid *uid, uint8_t validBits)
 bool PICC_ReadCardSerial(Mfrc522 *dev, Uid *uid)
 {
     uint8_t result = PICC_Select(dev, uid, 0);
-    printf("PICC_Select: %02X\n", result);
+    //pintf("PICC_Select: %02X\n", result);
     return (result == STATUS_OK);
 }
