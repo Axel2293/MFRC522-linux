@@ -16,6 +16,9 @@ Connected to the expansion IO on the board.
 | RST         | GPIO_P30       | Reset |
 | VCC         | 3.3V        | Power Supply |
 
+## Project prototype
+Here is a project I developed for my IOT class using this library, a mfrc522 reader and the PICO-PI-IMX8M-MINI. 
+The project consists of an access control system that works through the communication of a python app with a sub-process C app with sockets.
 ## Credits
 Full credits go to the miguelbalboa/rfid library for providing the implementation to interact with the mfrc522 and RFID cards.
 
