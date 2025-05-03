@@ -35,7 +35,9 @@ class MFRC522Module:
 
         self.command_dict = {
             "GET_UID": 0,
-            "GET_READER_VERSION": 1
+            "GET_READER_VERSION": 1,
+            "TURN_ON_GREEN_LED": 2,
+            "TURN_ON_RED_LED": 3,
         }
 
         self.status_dict = {
@@ -178,6 +180,16 @@ class MFRC522Module:
         else:
             return None
 
+    def mfrc522_green_led_on(self):
+        """Turn on the green LED."""
+        print("[*] Turning on green LED...")
+        self.mfrc522_send_command(str(self.command_dict["TURN_ON_GREEN_LED"]))
+
+    def mfrc522_red_led_on(self):
+        """Turn on the red LED."""
+        print("[*] Turning on red LED...")
+        self.mfrc522_send_command(str(self.command_dict["TURN_ON_RED_LED"]))
+
     def mfrc522_close(self):
         """Close the MFRC522 module."""
         self.mfrc522_stop_process()
@@ -280,7 +292,13 @@ def main():
                     print(f"[+] Server response: {response.json()}")
 
                 if response.json().get("message") == "Access Granted":
+                    # Send command to turn green led on
+                    mf_module.mfrc522_green_led_on()
                     print("[+] Access granted!!")
+                else:
+                    # Send command to turn red led on
+                    mf_module.mfrc522_red_led_on()
+                    print("[-] Access denied!!")
     except KeyboardInterrupt:
         print("\n[*] Exiting...")
         mf_module.mfrc522_close()

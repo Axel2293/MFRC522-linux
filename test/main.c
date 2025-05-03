@@ -5,6 +5,8 @@
 #include <arpa/inet.h>
 #include "../include/mfrc522.h" //  Include the mfrc522 driver header file
 
+#define GREEN_GPIO 8           // Pin 32 - line 8
+#define RED_GPIO 6             // Pin 28 - line 6
 // Define error codes
 typedef enum
 {
@@ -31,24 +33,35 @@ typedef struct
 
 typedef struct
 {
-    int socketFD;
+    int socketFD;   // Socket file descriptor
 } Socket;
+
+typedef struct
+{
+    struct gpiod_line *green_led; // GPIO line for the green LED
+    struct gpiod_line *red_led;   // GPIO line for the red LED
+} Leds;
 
 //////////////////////////////////////////////////////
 // Module utils
 //////////////////////////////////////////////////////
-void print_to_log(FILE *log_file, const char *message);        // Print the given string to the logs file descriptor
-void free_resources(Mfrc522 *dev, Socket *sock, FILE *logFile);     // Free up resources
+void print_to_log(FILE *log_file, const char *message);         // Print the given string to the logs file descriptor
+void free_resources(Mfrc522 *dev, Socket *sock, FILE *logFile); // Free up resources
 
 //////////////////////////////////////////////////////
-// Module style
+// Module LEDS operations
 //////////////////////////////////////////////////////
+uint8_t led_init(Mfrc522 *dev, Leds *leds); // Function to initialize the LEDs
+uint8_t led_green_on(Leds *leds);           // Function to turn on the green LED
+uint8_t led_green_off(Leds *leds);          // Function to turn off the green LED
+uint8_t led_red_on(Leds *leds);             // Function to turn on the red LED
+uint8_t led_red_off(Leds *leds);           // Function to turn off the red LED
 
 //////////////////////////////////////////////////////
-// Functions to use te mfrc522 reader  
+// Functions to use te mfrc522 reader
 //////////////////////////////////////////////////////
-bool validate_mfrc522_operations(Mfrc522 *dev); // Function to validate read/write operations
-uint8_t mfrc522_get_version(Mfrc522 *dev);   // Function to get the MFRC522 version
+bool validate_mfrc522_operations(Mfrc522 *dev);                      // Function to validate read/write operations
+uint8_t mfrc522_get_version(Mfrc522 *dev);                           // Function to get the MFRC522 version
 uint8_t mfrc522_wait_for_card(Mfrc522 *dev, Socket *sock, Uid *uid); // Function to wait for a card to be present
 
 //////////////////////////////////////////////////////
@@ -63,13 +76,13 @@ bool validate_mfrc522_version(Mfrc522 *dev);    // Function to print the MFRC522
 int socket_init(void);
 int socket_connect_master(Socket *sock, const char *master_host, const char *master_port);
 int socket_receive(Socket *sock, char *buffer, size_t buffer_size); // Receive data from the master
-int socket_send_ok(Socket *sock);   // Send OK message to master
-int socket_send_error(Socket *sock); // Send critical error message to master
-int socket_send_reader_version(Socket *sock, uint8_t version); // Send MFRC522 version to master
+int socket_send_ok(Socket *sock);                                   // Send OK message to master
+int socket_send_error(Socket *sock);                                // Send critical error message to master
+int socket_send_reader_version(Socket *sock, uint8_t version);      // Send MFRC522 version to master
 int socket_cleanup(Socket *socketFd);
 
 //  Global variables
-FILE *logFile = NULL; // Global log file pointer
+FILE *logFile = NULL;                      // Global log file pointer
 const char *logFilePath = "./mfrc522.log"; // Path to the log file
 
 //=======================================================================================================================================================================//
@@ -103,6 +116,7 @@ int main(int argc, char *argv[])
     pid_t pid = getpid();
     Mfrc522 *dev = calloc(1, sizeof(Mfrc522));
     Socket *sock = calloc(1, sizeof(Socket));
+    Leds *leds = calloc(1, sizeof(Leds));
 
     fprintf(logFile, "==============================\n");
     fprintf(logFile, "==== MFRC522 MODULE C.A.S ====\n");
@@ -140,6 +154,17 @@ int main(int argc, char *argv[])
     }
     fprintf(logFile, "[+] MFRC522 checks: OK\n");
     fflush(logFile);
+
+    // Initialize the LEDs
+    if (led_init(dev, leds) != 0)
+    {
+        fprintf(logFile, "[-] Failed to initialize LEDs\n");
+        fflush(logFile);
+        exit(ERROR_INIT);
+    }
+    fprintf(logFile, "[+] LEDs initialized\n");
+    fflush(logFile);
+
 
     // Open socket and connect to master
     if ((sock->socketFD = socket_init()) < 0)
@@ -209,7 +234,6 @@ int main(int argc, char *argv[])
                 fflush(logFile);
                 break;
             }
-
         }
         else if (strcmp(buffer, "1") == 0)
         {
@@ -235,6 +259,68 @@ int main(int argc, char *argv[])
             fprintf(logFile, "[+] MFRC522 version sent to master: %s\n", hex_version);
             fflush(logFile);
         }
+        else if (strcmp(buffer, "2") == 0)
+        {
+            // Turn the red LED off
+            if (led_red_off(leds) != 0)
+            {
+                fprintf(logFile, "[-] Failed to turn off red LED\n");
+                fflush(logFile);
+                exit(ERROR_INIT);
+            }
+
+            // Turn the green LED ON
+            if (led_green_on(leds) != 0)
+            {
+                fprintf(logFile, "[-] Failed to turn on green LED\n");
+                fflush(logFile);
+                exit(ERROR_INIT);
+            }
+            fprintf(logFile, "[+] Green LED turned ON\n");
+            fflush(logFile);
+
+            // Wait for 5 seconds
+            usleep(5000000);
+            // Turn the green LED OFF
+            if (led_green_off(leds) != 0)
+            {
+                fprintf(logFile, "[-] Failed to turn off green LED\n");
+                fflush(logFile);
+                exit(ERROR_INIT);
+            }
+        }
+        else if (strcmp(buffer, "3") == 0)
+        {
+            // Turn the green LED OFF
+            if (led_green_off(leds) != 0)
+            {
+                fprintf(logFile, "[-] Failed to turn off green LED\n");
+                fflush(logFile);
+                exit(ERROR_INIT);
+            }
+            fprintf(logFile, "[+] Green LED turned OFF\n");
+            fflush(logFile);
+
+            // Turn the red LED ON
+            if (led_red_on(leds) != 0)
+            {
+                fprintf(logFile, "[-] Failed to turn on red LED\n");
+                fflush(logFile);
+                exit(ERROR_INIT);
+            }
+            fprintf(logFile, "[+] Red LED turned ON\n");
+            fflush(logFile);
+
+            // Wait for 5 seconds
+            usleep(5000000);
+            // Turn the red LED OFF
+            if (led_red_off(leds) != 0)
+            {
+                fprintf(logFile, "[-] Failed to turn off red LED\n");
+                fflush(logFile);
+                exit(ERROR_INIT);
+            }
+        }
         else
         {
             fprintf(logFile, "[-] Unknown command from master: %s\n", buffer);
@@ -247,7 +333,8 @@ int main(int argc, char *argv[])
     exit(EXIT_SUCCESS);
 }
 
-void free_resources(Mfrc522 *dev, Socket *sock, FILE *logFile) {
+void free_resources(Mfrc522 *dev, Socket *sock, FILE *logFile)
+{
     // Close the log file
     fclose(logFile);
     // Clean up
@@ -256,6 +343,95 @@ void free_resources(Mfrc522 *dev, Socket *sock, FILE *logFile) {
     socket_cleanup(sock);
 
     free(dev);
+}
+////////////////////////////////////////////////////////////////
+uint8_t led_init(Mfrc522 *dev, Leds *leds)
+{
+    struct gpiod_chip *chip = NULL;
+    if ((chip = dev->gpio_chip) == NULL)
+    {
+        fprintf(logFile, "[-] Failed to open GPIO chip\n");
+        fflush(logFile);
+        return ERROR_INIT;
+    }
+    fprintf(logFile, "[+] GPIO chip opened\n");
+    fflush(logFile);
+
+    leds->green_led = gpiod_chip_get_line(chip, GREEN_GPIO);
+    if (!leds->green_led) {
+        fprintf(logFile, "[-] Failed to get green LED GPIO line\n");
+        fflush(logFile);
+        return ERROR_INIT;
+    }
+    // Set led to output
+    if (gpiod_line_request_output(leds->green_led, "green_led", 0) < 0) {
+        fprintf(logFile, "[-] Failed to request green LED GPIO line\n");
+        fflush(logFile);
+        return ERROR_INIT;
+    }
+
+    if ((leds->red_led = gpiod_chip_get_line(chip, RED_GPIO)) == NULL) {
+        fprintf(logFile, "[-] Failed to get red LED GPIO line\n");
+        fflush(logFile);
+        return ERROR_INIT;
+
+    }
+    // Set led to output
+    if (gpiod_line_request_output(leds->red_led, "red_led", 0) < 0) {
+        fprintf(logFile, "[-] Failed to request red LED GPIO line\n");
+        fflush(logFile);
+        return ERROR_INIT;
+    }
+
+    return EXIT_SUCCESS;
+}
+
+uint8_t led_green_on(Leds *leds)
+{
+    // Turn the green LED on
+    if (gpiod_line_set_value(leds->green_led, 1) < 0)
+    {
+        fprintf(logFile, "[-] Failed to turn on green LED\n");
+        fflush(logFile);
+        return ERROR_INIT;
+    }
+    return EXIT_SUCCESS;
+}
+
+uint8_t led_green_off(Leds *leds)
+{
+    // Turn the green LED off
+    if (gpiod_line_set_value(leds->green_led, 0) < 0)
+    {
+        fprintf(logFile, "[-] Failed to turn off green LED\n");
+        fflush(logFile);
+        return ERROR_INIT;
+    }
+    return EXIT_SUCCESS;
+}
+
+uint8_t led_red_on(Leds *leds)
+{
+    // Turn the red LED on
+    if (gpiod_line_set_value(leds->red_led, 1) < 0)
+    {
+        fprintf(logFile, "[-] Failed to turn on red LED\n");
+        fflush(logFile);
+        return ERROR_INIT;
+    }
+    return EXIT_SUCCESS;
+}
+
+uint8_t led_red_off(Leds *leds)
+{
+    // Turn the red LED off
+    if (gpiod_line_set_value(leds->red_led, 0) < 0)
+    {
+        fprintf(logFile, "[-] Failed to turn off red LED\n");
+        fflush(logFile);
+        return ERROR_INIT;
+    }
+    return EXIT_SUCCESS;
 }
 
 ////////////////////////////////////////////////////////////////
@@ -309,25 +485,31 @@ int socket_connect_master(Socket *sock, const char *master_host, const char *mas
     return EXIT_SUCCESS;
 }
 
-int socket_send_ok(Socket *sock) {
+int socket_send_ok(Socket *sock)
+{
     char message[256] = "OK";
-    if (send(sock->socketFD, message, sizeof(message), strlen(message)) < 0) {
+    if (send(sock->socketFD, message, sizeof(message), strlen(message)) < 0)
+    {
         return ERROR_SOCKET_CONNECTION;
     }
     return EXIT_SUCCESS;
 }
 
-int socket_send_error(Socket *sock) {
+int socket_send_error(Socket *sock)
+{
     char message[256] = "ERROR";
-    if (send(sock->socketFD, message, sizeof(message), strlen(message)) < 0) {
+    if (send(sock->socketFD, message, sizeof(message), strlen(message)) < 0)
+    {
         return ERROR_SOCKET_CONNECTION;
     }
     return EXIT_SUCCESS;
 }
 
-int socket_receive(Socket *sock, char *buffer, size_t buffer_size) {
+int socket_receive(Socket *sock, char *buffer, size_t buffer_size)
+{
     ssize_t bytes_received = recv(sock->socketFD, buffer, buffer_size - 1, 0);
-    if (bytes_received < 0) {
+    if (bytes_received < 0)
+    {
         return ERROR_SOCKET_CONNECTION;
     }
     buffer[bytes_received] = '\0'; // Null-terminate the received string
@@ -341,8 +523,10 @@ int socket_cleanup(Socket *sock)
     return EXIT_SUCCESS;
 }
 
-int socket_send_reader_version(Socket *sock, uint8_t version) {
-    if (version == 0x00 || version == 0xFF) {
+int socket_send_reader_version(Socket *sock, uint8_t version)
+{
+    if (version == 0x00 || version == 0xFF)
+    {
         return ERROR_MFRC522_READ;
     }
     // Convert version to hex string
@@ -350,7 +534,8 @@ int socket_send_reader_version(Socket *sock, uint8_t version) {
     snprintf(hex_version, sizeof(hex_version), "%02X", version);
 
     // Send the version to the master
-    if (send(sock->socketFD, hex_version, sizeof(hex_version), strlen(hex_version)) < 0) {
+    if (send(sock->socketFD, hex_version, sizeof(hex_version), strlen(hex_version)) < 0)
+    {
         return ERROR_SOCKET_CONNECTION;
     }
     fprintf(logFile, "[+] MFRC522 version sent to master: %s\n", hex_version);
@@ -423,7 +608,8 @@ bool validate_mfrc522_version(Mfrc522 *dev)
     return true;
 }
 
-uint8_t mfrc522_get_version(Mfrc522 *dev) {
+uint8_t mfrc522_get_version(Mfrc522 *dev)
+{
     return mfrc522_read_register(dev, VersionReg);
 }
 
@@ -454,6 +640,5 @@ uint8_t mfrc522_wait_for_card(Mfrc522 *dev, Socket *sock, Uid *uid)
                 return EXIT_SUCCESS;
             }
         }
-        
     }
 }

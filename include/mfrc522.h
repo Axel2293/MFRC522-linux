@@ -123,7 +123,7 @@
 
 // GPIO Configuration
 #define GPIO_CHIP_NAME "gpiochip2" // GPIO chip name that contains the reset pin (under /dev/gpiochipN)
-#define RESET_PIN 30               // GPIO pin number for the MFRC522 reset line
+#define RESET_PIN 7                // GPIO pin number for the MFRC522 reset line
 
 // SPI Configuration
 #define SPI_DEVICE "/dev/spidev1.0"
